@@ -8,8 +8,11 @@ description = "Sagepick Core Backend Service"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.17.0",
+    "asyncpg>=0.30.0",
     "fastapi>=0.119.0",
     "psycopg2-binary>=2.9.11",
+    "pydantic-settings>=2.11.0",
     "sqlalchemy>=2.0.44",
     "sqlmodel>=0.0.27",
     "uvicorn[standard]>=0.37.0",
