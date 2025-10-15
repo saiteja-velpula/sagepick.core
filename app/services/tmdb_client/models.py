@@ -54,14 +54,14 @@ class MovieItem(BaseModel):
     adult: bool
     genre_ids: List[int] = Field(default_factory=list)
 
-    @field_validator('release_date', pre=True)
+    @field_validator('release_date', mode='before')
     def parse_release_date(cls, v):
         """Handle empty string or null release dates."""
         if not v or v == "":
             return None
         return v
 
-    @field_validator('overview', pre=True)
+    @field_validator('overview', mode='before')
     def parse_overview(cls, v):
         if v == "":
             return None
@@ -100,13 +100,13 @@ class MovieDetails(BaseModel):
     production_countries: List[ProductionCountry] = Field(default_factory=list)
     spoken_languages: List[SpokenLanguage] = Field(default_factory=list)
 
-    @field_validator('release_date', pre=True)
+    @field_validator('release_date', mode='before')
     def parse_release_date(cls, v):
         if not v or v == "":
             return None
         return v
 
-    @field_validator('overview', pre=True)
+    @field_validator('overview', mode='before')
     def parse_overview(cls, v):
         if v == "":
             return None

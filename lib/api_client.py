@@ -18,7 +18,7 @@ class RetryConfig:
             self.retry_on_status = {408, 425, 429, 500, 502, 503, 504}
 
 
-class BaseApiClient:
+class ApiClient:
     def __init__(
         self,
         base_url: str,

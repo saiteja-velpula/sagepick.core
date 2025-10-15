@@ -1,7 +1,7 @@
 from typing import List, Dict, Any
-from ..core.settings import settings
-from .base import BaseApiClient, RetryConfig
-from .tmdb_models import (
+from app.core.settings import settings
+from lib import ApiClient, RetryConfig
+from .models import (
     TMDBMovieListResponse,
     MovieDetails,
     GenresResponse,
@@ -28,7 +28,7 @@ class TMDBClient:
             retry_on_status={408, 429, 500, 502, 503, 504}
         )
         
-        self.client = BaseApiClient(
+        self.client = ApiClient(
             base_url=self.BASE_URL,
             headers=headers,
             retry_config=retry_config,

@@ -1,5 +1,5 @@
-from .tmdb_client import TMDBClient, create_tmdb_client
-from .tmdb_models import (
+from .client import TMDBClient, create_tmdb_client
+from .models import (
     MovieItem,
     MovieDetails,
     MovieSearchParams, 

@@ -66,8 +66,13 @@ class MovieUpdate(SQLModel):
     vote_count: Optional[int] = None
     popularity: Optional[float] = None
     runtime: Optional[int] = None
+    budget: Optional[int] = None
+    revenue: Optional[int] = None
+    status: Optional[str] = None
     adult: Optional[bool] = None
 
+class MovieCreate(MovieBase):
+    pass
 
 class MovieRead(MovieBase):
     id: int
