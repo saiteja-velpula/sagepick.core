@@ -3,6 +3,8 @@ from .keyword import Keyword, KeywordRead
 from .movie import Movie, MovieRead, MovieUpdate
 from .movie_genre import MovieGenre
 from .movie_keyword import MovieKeyword
+from .media_category import MediaCategory, MediaCategoryRead, MediaCategoryUpdate
+from .media_category_movie import MediaCategoryMovie
 
 __all__ = [
     "Genre",
@@ -14,4 +16,8 @@ __all__ = [
     "MovieUpdate",
     "MovieGenre",
     "MovieKeyword",
+    "MediaCategory",
+    "MediaCategoryRead", 
+    "MediaCategoryUpdate",
+    "MediaCategoryMovie",
 ]

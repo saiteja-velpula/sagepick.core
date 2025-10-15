@@ -3,10 +3,12 @@ from datetime import date, datetime
 from sqlmodel import SQLModel, Field, Relationship
 from .movie_genre import MovieGenre
 from .movie_keyword import MovieKeyword
+from .media_category_movie import MediaCategoryMovie
 
 if TYPE_CHECKING:
     from .genre import Genre
     from .keyword import Keyword
+    from .media_category import MediaCategory
 
 
 class MovieBase(SQLModel):
@@ -33,6 +35,9 @@ class MovieBase(SQLModel):
     
     # Other essential details
     runtime: Optional[int] = Field(default=None, description="Runtime in minutes")
+    budget: Optional[int] = Field(default=None, description="Budget in USD")
+    revenue: Optional[int] = Field(default=None, description="Revenue in USD")
+    status: Optional[str] = Field(default=None, max_length=50, description="Movie status (e.g., Released)")
     adult: bool = Field(default=False, description="Adult content flag")
 
 
@@ -46,6 +51,7 @@ class Movie(MovieBase, table=True):
     # Many-to-many relationships
     genres: List["Genre"] = Relationship(back_populates="movies", link_model=MovieGenre)
     keywords: List["Keyword"] = Relationship(back_populates="movies", link_model=MovieKeyword)
+    media_categories: List["MediaCategory"] = Relationship(back_populates="movies", link_model=MediaCategoryMovie)
 
 
 class MovieUpdate(SQLModel):
