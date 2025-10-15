@@ -5,6 +5,15 @@ from .movie_genre import MovieGenre
 from .movie_keyword import MovieKeyword
 from .media_category import MediaCategory, MediaCategoryRead, MediaCategoryUpdate
 from .media_category_movie import MediaCategoryMovie
+from .job_status import (
+    JobStatus, 
+    JobStatusCreate, 
+    JobStatusUpdate, 
+    JobStatusRead,
+    JobType,
+    JobExecutionStatus
+)
+from .job_log import JobLog, JobLogCreate, JobLogRead, LogLevel
 
 __all__ = [
     "Genre",
@@ -21,4 +30,14 @@ __all__ = [
     "MediaCategoryRead", 
     "MediaCategoryUpdate",
     "MediaCategoryMovie",
+    "JobStatus",
+    "JobStatusCreate",
+    "JobStatusUpdate", 
+    "JobStatusRead",
+    "JobType",
+    "JobExecutionStatus",
+    "JobLog",
+    "JobLogCreate",
+    "JobLogRead",
+    "LogLevel",
 ]
