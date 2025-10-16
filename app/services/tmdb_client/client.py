@@ -8,6 +8,7 @@ from .models import (
     KeywordsResponse,
     MovieSearchParams,
     MovieListResponse,
+    MovieChangeResponse,
     PaginationInfo
 )
 
@@ -139,6 +140,12 @@ class TMDBClient:
         response = await self.client.get("/search/movie", params=params)
         return self._transform_list_response(response)
     
+    # CHANGES ENDPOINT
+    async def get_movie_changes(self, page: int = 1) -> MovieChangeResponse:
+        params = self._build_params(page=page)
+        response = await self.client.get("/movie/changes", params=params)
+        return MovieChangeResponse(**response)
+
     # CONVENIENCE METHODS FOR SPECIFIC REGIONS
     
     # Indian Cinema

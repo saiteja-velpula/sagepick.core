@@ -115,6 +115,10 @@ class MovieDetails(BaseModel):
     class Config:
         populate_by_name = True
 
+class MovieChangeItem(BaseModel):
+    id: int
+    adult: bool
+
 
 # API response wrappers
 class KeywordsResponse(BaseModel):
@@ -143,6 +147,12 @@ class PaginationInfo(BaseModel):
 class MovieListResponse(BaseModel):
     movies: List[MovieItem]
     pagination: PaginationInfo
+    
+class MovieChangeResponse(BaseModel):
+    results: List[MovieChangeItem]
+    page: int
+    total_pages: int
+    total_results: int
 
 
 # Search parameters
