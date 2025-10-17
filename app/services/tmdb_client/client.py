@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from app.core.settings import settings
-from lib import ApiClient, RetryConfig
+from app.core import ApiClient, RetryConfig
 from .models import (
     TMDBMovieListResponse,
     MovieDetails,
@@ -15,7 +15,6 @@ from .models import (
 
 class TMDBClient:
     BASE_URL = "https://api.themoviedb.org/3"
-    IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
     
     def __init__(self):
         headers = {
@@ -67,11 +66,10 @@ class TMDBClient:
         response = await self.client.get(f"/movie/{movie_id}", params=params)
         return MovieDetails(**response)
     
-    async def get_movie_keywords(self, movie_id: int) -> List[int]:
+    async def get_movie_keywords(self, movie_id: int) -> KeywordsResponse:
         response = await self.client.get(f"/movie/{movie_id}/keywords")
-        keywords_response = KeywordsResponse(**response)
-        return [keyword.id for keyword in keywords_response.keywords]
-    
+        return KeywordsResponse(**response)
+
     async def get_movie_genres(self) -> GenresResponse:
         params = self._build_params(language="en-US")
         response = await self.client.get("/genre/movie/list", params=params)
