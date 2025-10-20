@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.core.scheduler import job_scheduler
 from app.core.redis import redis_client
+from app.api import router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +47,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+app.include_router(router)
 
 # Root endpoint
 @app.get("/")
