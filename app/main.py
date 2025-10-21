@@ -58,6 +58,17 @@ def read_root():
         "version": "1.0.0",
         "description": "Movie recommendation system with automated TMDB data synchronization"
     }
+    
+# Protected endpoint test
+from app.api.deps import verify_token
+from fastapi import Depends
+
+@app.get("/protected")
+def read_protected(token_data: dict = Depends(verify_token)):
+    return {
+        "message": "Example of protected endpoint",
+        "service": token_data.get("sub")
+    }
 
 
 if __name__ == "__main__":
