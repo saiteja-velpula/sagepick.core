@@ -1,19 +1,12 @@
-import asyncio
 import logging
-from typing import List, Dict, Any
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.redis import redis_client
 from app.services.tmdb_client.client import TMDBClient
-from app.crud.movie import movie
-from app.crud.genre import genre
-from app.crud.keyword import keyword
-from app.crud.job_status import job_status
-from app.crud.job_log import job_log
-from app.models.job_status import JobType, JobExecutionStatus
-from app.models.movie import MovieCreate
+from app.crud import job_status, job_log
+from app.models.job_status import JobType
+from app.utils.movie_processor import process_movie_batch
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +125,7 @@ class ChangeTrackingJob:
                     await job_status.update_total_items(db, job_id, estimated_total)
                 
                 # Process each changed movie
+                movie_ids = []
                 for movie_data in changed_movies:
                     movie_id = movie_data.id
                     if not movie_id:
@@ -147,15 +141,17 @@ class ChangeTrackingJob:
                         )
                         continue
                     
-                    try:
-                        await self._process_changed_movie(db, job_id, movie_id)
-                        processed_count += 1
-                        
-                        # Add delay between API calls
-                        await asyncio.sleep(API_DELAY)
-                        
-                    finally:
-                        # Always release the lock
+                    movie_ids.append(movie_id)
+                
+                # Process movies in batch using utility function
+                if movie_ids:
+                    batch_processed = await process_movie_batch(
+                        db, self.tmdb_client, movie_ids, job_id
+                    )
+                    processed_count += batch_processed
+                    
+                    # Release locks for all processed movies
+                    for movie_id in movie_ids:
                         await redis_client.release_movie_lock(movie_id)
                 
                 current_page += 1
@@ -177,95 +173,6 @@ class ChangeTrackingJob:
                 f"Error in _track_changes: {str(e)}"
             )
             raise
-    
-    async def _process_changed_movie(self, db: AsyncSession, job_id: int, movie_id: int):
-        """Process a changed movie: fetch latest details, keywords, and update database."""
-        try:
-            await job_log.log_info(
-                db,
-                job_id,
-                f"Processing changed movie {movie_id}"
-            )
-            
-            # Fetch movie details
-            movie_details = await self.tmdb_client.get_movie_by_id(movie_id)
-            if not movie_details:
-                await job_log.log_warning(
-                    db,
-                    job_id,
-                    f"Could not fetch details for changed movie {movie_id}"
-                )
-                return
-            
-            # Fetch movie keywords
-            keywords_response = await self.tmdb_client.get_movie_keywords(movie_id)
-            
-            # Add delay after API calls
-            await asyncio.sleep(API_DELAY)
-            
-            # Process genres
-            genre_ids = []
-            if movie_details.genres:
-                for genre_data in movie_details.genres:
-                    genre_obj = await genre.upsert_genre(
-                        db,
-                        genre_id=genre_data.id,
-                        name=genre_data.name
-                    )
-                    genre_ids.append(genre_obj.id)
-            
-            # Process keywords
-            keyword_db_ids = []
-            for kw in keywords_response.keywords:
-                keyword_obj = await keyword.upsert_keyword(
-                    db,
-                    keyword_id=kw.id,
-                    name=kw.name
-                )
-                keyword_db_ids.append(keyword_obj.id)
-            
-            # Create movie object
-            movie_create = MovieCreate(
-                tmdb_id=movie_details.tmdb_id,
-                title=movie_details.title,
-                original_title=movie_details.original_title,
-                overview=movie_details.overview or "",
-                release_date=movie_details.release_date,
-                runtime=movie_details.runtime,
-                budget=movie_details.budget or 0,
-                revenue=movie_details.revenue or 0,
-                vote_average=movie_details.vote_average,
-                vote_count=movie_details.vote_count,
-                popularity=movie_details.popularity,
-                poster_path=movie_details.poster_path,
-                backdrop_path=movie_details.backdrop_path,
-                adult=movie_details.adult,
-                original_language=movie_details.original_language,
-                status=movie_details.status or ""
-            )
-            
-            # Upsert movie with relationships (this will update existing or create new)
-            movie_obj = await movie.upsert_movie_with_relationships(
-                db,
-                movie_create=movie_create,
-                genre_ids=genre_ids,
-                keyword_ids=keyword_db_ids
-            )
-            
-            await job_log.log_info(
-                db,
-                job_id,
-                f"Successfully updated changed movie: {movie_obj.title} (ID: {movie_obj.tmdb_id})"
-            )
-            
-        except Exception as e:
-            await job_log.log_error(
-                db,
-                job_id,
-                f"Error processing changed movie {movie_id}: {str(e)}"
-            )
-            # Don't re-raise here, continue with other movies
-            logger.error(f"Error processing changed movie {movie_id}: {str(e)}", exc_info=True)
 
 
 # Job instance for scheduler

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,8 +5,9 @@ from app.core.db import get_session
 from app.core.redis import redis_client
 from app.services.tmdb_client.client import TMDBClient
 from app.services.tmdb_client.models import MovieSearchParams
-from app.crud import movie, genre, keyword, job_status, job_log
-from app.models import JobType, MovieCreate
+from app.crud import job_status, job_log
+from app.models import JobType
+from app.utils.movie_processor import process_movie_batch
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ class MovieDiscoveryJob:
             )
             
             # Process movies (limit to ITEMS_PER_RUN)
-            processed_count = 0
+            movie_ids = []
             for movie_data in movies[:ITEMS_PER_RUN]:
                 movie_id = movie_data.tmdb_id
                 if not movie_id:
@@ -151,15 +151,17 @@ class MovieDiscoveryJob:
                     )
                     continue
                 
-                try:
-                    await self._process_single_movie(db, job_id, movie_id)
-                    processed_count += 1
-                    
-                    # Add delay between API calls
-                    await asyncio.sleep(API_DELAY)
-                    
-                finally:
-                    # Always release the lock
+                movie_ids.append(movie_id)
+            
+            # Process movies in batch using utility function
+            processed_count = 0
+            if movie_ids:
+                processed_count = await process_movie_batch(
+                    db, self.tmdb_client, movie_ids, job_id
+                )
+                
+                # Release locks for all processed movies
+                for movie_id in movie_ids:
                     await redis_client.release_movie_lock(movie_id)
             
             # Reset to page 1 if we've reached the end
@@ -180,97 +182,6 @@ class MovieDiscoveryJob:
                 f"Error in _discover_movies: {str(e)}"
             )
             raise
-    
-    async def _process_single_movie(self, db: AsyncSession, job_id: int, movie_id: int):
-        """Process a single movie: fetch details, keywords, and upsert to database."""
-        try:
-            await job_log.log_info(
-                db,
-                job_id,
-                f"Processing movie {movie_id}"
-            )
-            
-            # Fetch movie details
-            movie_details = await self.tmdb_client.get_movie_by_id(movie_id)
-            if not movie_details:
-                await job_log.log_warning(
-                    db,
-                    job_id,
-                    f"Could not fetch details for movie {movie_id}"
-                )
-                return
-            
-            # Fetch movie keywords
-            keywords = await self.tmdb_client.get_movie_keywords(movie_id)
-            
-            # Add delay after API calls
-            await asyncio.sleep(API_DELAY)
-            
-            # Process genres
-            genre_ids = []
-            if movie_details.genres:
-                for genre_data in movie_details.genres:
-                    genre_obj = await genre.upsert_genre(
-                        db,
-                        genre_id=genre_data.id,
-                        name=genre_data.name
-                    )
-                    genre_ids.append(genre_obj.id)
-            
-            # Process keywords - fetch keyword details and upsert
-            keyword_db_ids = []
-            for kw in keywords.keywords:
-                # For now, create keyword with just ID and placeholder name
-                # You may want to fetch keyword details from TMDB if needed
-                keyword_obj = await keyword.upsert_keyword(
-                    db,
-                    keyword_id=kw.id,
-                    name=kw.name
-                )
-                keyword_db_ids.append(keyword_obj.id)
-            
-            # Create movie object
-            movie_create = MovieCreate(
-                tmdb_id=movie_details.tmdb_id,
-                title=movie_details.title,
-                original_title=movie_details.original_title,
-                overview=movie_details.overview or "",
-                release_date=movie_details.release_date,
-                runtime=movie_details.runtime,
-                budget=movie_details.budget or 0,
-                revenue=movie_details.revenue or 0,
-                vote_average=movie_details.vote_average,
-                vote_count=movie_details.vote_count,
-                popularity=movie_details.popularity,
-                poster_path=movie_details.poster_path,
-                backdrop_path=movie_details.backdrop_path,
-                adult=movie_details.adult,
-                original_language=movie_details.original_language,
-                status=movie_details.status or "",
-            )
-            
-            # Upsert movie with relationships
-            movie_obj = await movie.upsert_movie_with_relationships(
-                db,
-                movie_create=movie_create,
-                genre_ids=genre_ids,
-                keyword_ids=keyword_db_ids
-            )
-            
-            await job_log.log_info(
-                db,
-                job_id,
-                f"Successfully processed movie: {movie_obj.title} (ID: {movie_obj.tmdb_id})"
-            )
-            
-        except Exception as e:
-            await job_log.log_error(
-                db,
-                job_id,
-                f"Error processing movie {movie_id}: {str(e)}"
-            )
-            # Don't re-raise here, continue with other movies
-            logger.error(f"Error processing movie {movie_id}: {str(e)}", exc_info=True)
 
 
 # Job instance for scheduler

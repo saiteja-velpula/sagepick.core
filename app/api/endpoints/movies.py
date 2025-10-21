@@ -18,6 +18,7 @@ from app.models.genre import Genre
 from app.models.keyword import Keyword
 from app.models.movie_genre import MovieGenre
 from app.models.movie_keyword import MovieKeyword
+from app.api.deps import verify_token
 from app.models.api_models import (
     PaginatedResponse, 
     PaginationInfo, 
@@ -52,7 +53,8 @@ async def get_movies(
     genre: Optional[str] = Query(None, description="Filter by genre name"),
     min_popularity: Optional[float] = Query(None, ge=0, description="Minimum popularity score"),
     adult: Optional[bool] = Query(None, description="Filter by adult content"),
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get paginated list of movies with essential fields only."""
     offset = (page - 1) * per_page
@@ -118,7 +120,8 @@ async def get_movies(
 @router.get("/movies/{movie_id}", response_model=MovieFullDetail)
 async def get_movie_by_id(
     movie_id: int,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get movie by ID with all details including genres and keywords."""
     # Get movie
@@ -169,7 +172,8 @@ async def get_movie_by_id(
 @router.get("/movies/tmdb/{tmdb_id}", response_model=MovieFullDetail)
 async def get_movie_by_tmdb_id(
     tmdb_id: int,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get movie by TMDB ID with all details."""
     movie_obj = await movie_crud.get_by_tmdb_id(db, tmdb_id)
@@ -185,7 +189,7 @@ async def get_movie_by_tmdb_id(
 
 # Movie Categories Endpoints
 @router.get("/categories", response_model=List[MediaCategoryRead])
-async def get_movie_categories(db: AsyncSession = Depends(get_session)):
+async def get_movie_categories(db: AsyncSession = Depends(get_session), token: dict = Depends(verify_token)):
     """Get all movie categories."""
     return await media_category_crud.get_all_categories(db)
 
@@ -193,7 +197,8 @@ async def get_movie_categories(db: AsyncSession = Depends(get_session)):
 @router.get("/categories/{category_id}", response_model=MediaCategoryRead)
 async def get_movie_category(
     category_id: int,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get a specific movie category."""
     category = await media_category_crud.get(db, category_id)
@@ -210,7 +215,8 @@ async def get_movies_by_category(
     category_id: int,
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get movies in a specific category with pagination."""
     # Check if category exists
@@ -274,7 +280,8 @@ async def get_movies_by_category_name(
     category_name: str,
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get movies in a category by category name with pagination."""
     # Get category by name
@@ -291,7 +298,7 @@ async def get_movies_by_category_name(
 
 # Statistics Endpoints
 @router.get("/stats")
-async def get_movie_statistics(db: AsyncSession = Depends(get_session)):
+async def get_movie_statistics(db: AsyncSession = Depends(get_session), token: dict = Depends(verify_token)):
     """Get movie database statistics."""
     # Total movies
     total_movies_query = select(func.count(Movie.id))

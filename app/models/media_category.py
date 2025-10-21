@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 class MediaCategoryBase(SQLModel):
     name: str = Field(max_length=200, unique=True, index=True, description="Category name (e.g., Trending Movies, Popular Movies)")
+    description: Optional[str] = Field(default=None, description="Description of the media category")
 
 
 class MediaCategory(MediaCategoryBase, table=True):

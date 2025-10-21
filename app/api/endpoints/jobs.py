@@ -10,13 +10,14 @@ from app.crud.job_status import job_status
 from app.crud.job_log import job_log
 from app.models.job_status import JobType, JobExecutionStatus, JobStatusRead
 from app.models.job_log import JobLogRead, LogLevel
+from app.api.deps import verify_token
 
 router = APIRouter()
 
 
 # Scheduler Status Endpoints
 @router.get("/scheduler/status")
-async def get_scheduler_status():
+async def get_scheduler_status(token: dict = Depends(verify_token)):
     """Get the current status of the job scheduler."""
     return {
         "is_running": job_scheduler.is_running,
@@ -25,7 +26,7 @@ async def get_scheduler_status():
 
 
 @router.post("/scheduler/{job_id}/trigger")
-async def trigger_job_manually(job_id: str):
+async def trigger_job_manually(job_id: str, token: dict = Depends(verify_token)):
     """Manually trigger a job to run immediately."""
     valid_job_ids = ["movie_discovery_job", "change_tracking_job", "category_refresh_job"]
     
@@ -47,7 +48,7 @@ async def trigger_job_manually(job_id: str):
 
 
 @router.post("/scheduler/{job_id}/pause")
-async def pause_job(job_id: str):
+async def pause_job(job_id: str, token: dict = Depends(verify_token)):
     """Pause a scheduled job."""
     success = job_scheduler.pause_job(job_id)
     
@@ -61,7 +62,7 @@ async def pause_job(job_id: str):
 
 
 @router.post("/scheduler/{job_id}/resume")
-async def resume_job(job_id: str):
+async def resume_job(job_id: str, token: dict = Depends(verify_token)):
     """Resume a paused job."""
     success = job_scheduler.resume_job(job_id)
     
@@ -80,7 +81,8 @@ async def get_recent_job_statuses(
     limit: int = Query(50, ge=1, le=200),
     job_type: Optional[JobType] = Query(None, description="Filter by job type"),
     status_filter: Optional[JobExecutionStatus] = Query(None, alias="status", description="Filter by execution status"),
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get recent job execution statuses with optional filtering."""
     query = select(job_status.model)
@@ -98,7 +100,7 @@ async def get_recent_job_statuses(
 
 
 @router.get("/status/running", response_model=List[JobStatusRead])
-async def get_running_jobs(db: AsyncSession = Depends(get_session)):
+async def get_running_jobs(db: AsyncSession = Depends(get_session), token: dict = Depends(verify_token)):
     """Get all currently running jobs."""
     return await job_status.get_running_jobs(db)
 
@@ -106,7 +108,8 @@ async def get_running_jobs(db: AsyncSession = Depends(get_session)):
 @router.get("/status/failed", response_model=List[JobStatusRead])
 async def get_failed_jobs(
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get recently failed jobs."""
     statement = select(job_status.model).where(
@@ -119,7 +122,8 @@ async def get_failed_jobs(
 @router.get("/status/completed", response_model=List[JobStatusRead])
 async def get_completed_jobs(
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get recently completed jobs."""
     statement = select(job_status.model).where(
@@ -133,7 +137,8 @@ async def get_completed_jobs(
 async def get_job_statuses_by_type(
     job_type: JobType,
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get job statuses by job type."""
     return await job_status.get_jobs_by_type(db, job_type, limit=limit)
@@ -142,7 +147,8 @@ async def get_job_statuses_by_type(
 @router.get("/status/{job_id}", response_model=JobStatusRead)
 async def get_job_status(
     job_id: int,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get status of a specific job execution."""
     job_status_obj = await job_status.get(db, job_id)
@@ -159,7 +165,8 @@ async def get_job_status(
 @router.delete("/status/{job_id}")
 async def delete_job_status(
     job_id: int,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Delete a job status record and its associated logs."""
     job_status_obj = await job_status.get(db, job_id)
@@ -225,7 +232,8 @@ async def get_job_status(
 async def get_recent_job_logs(
     limit: int = Query(100, ge=1, le=1000),
     level: Optional[LogLevel] = Query(None, description="Filter by log level"),
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get recent job logs across all jobs with optional filtering."""
     if level:
@@ -241,7 +249,8 @@ async def get_recent_job_logs(
 @router.get("/logs/errors", response_model=List[JobLogRead])
 async def get_error_logs(
     limit: int = Query(50, ge=1, le=500),
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get recent error logs."""
     return await job_log.get_error_logs(db, limit=limit)
@@ -250,7 +259,8 @@ async def get_error_logs(
 @router.get("/logs/job/{job_status_id}", response_model=List[JobLogRead])
 async def get_job_logs(
     job_status_id: int,
-    db: AsyncSession = Depends(get_session)
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
 ):
     """Get all logs for a specific job execution."""
     logs = await job_log.get_logs_by_job_id(db, job_status_id)
@@ -327,7 +337,7 @@ async def delete_job_status(
 
 # Job Management Endpoints
 @router.post("/scheduler/start")
-async def start_scheduler():
+async def start_scheduler(token: dict = Depends(verify_token)):
     """Start the job scheduler if it's not running."""
     if job_scheduler.is_running:
         return {"message": "Scheduler is already running"}
@@ -343,7 +353,7 @@ async def start_scheduler():
 
 
 @router.post("/scheduler/stop")
-async def stop_scheduler():
+async def stop_scheduler(token: dict = Depends(verify_token)):
     """Stop the job scheduler."""
     if not job_scheduler.is_running:
         return {"message": "Scheduler is not running"}
@@ -359,7 +369,7 @@ async def stop_scheduler():
 
 
 @router.get("/types")
-async def get_job_types():
+async def get_job_types(token: dict = Depends(verify_token)):
     """Get all available job types."""
     return {
         "job_types": [{"name": job_type.name, "value": job_type.value} for job_type in JobType],
@@ -369,7 +379,7 @@ async def get_job_types():
 
 # Redis/System Health Endpoints
 @router.get("/health")
-async def get_system_health():
+async def get_system_health(token: dict = Depends(verify_token)):
     """Get overall system health status."""
     try:
         # Initialize Redis if needed
@@ -405,7 +415,7 @@ async def get_system_health():
 
 
 @router.get("/stats")
-async def get_job_statistics(db: AsyncSession = Depends(get_session)):
+async def get_job_statistics(db: AsyncSession = Depends(get_session), token: dict = Depends(verify_token)):
     """Get job execution statistics."""
     # Get recent jobs (last 100)
     recent_jobs = await job_status.get_recent_jobs(db, limit=100)

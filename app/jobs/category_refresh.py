@@ -1,20 +1,14 @@
 import asyncio
 import logging
-from typing import List, Dict, Any
-from datetime import datetime
+from typing import List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.redis import redis_client
 from app.services.tmdb_client.client import TMDBClient
-from app.crud.movie import movie
-from app.crud.genre import genre
-from app.crud.keyword import keyword
-from app.crud.media_category import media_category
-from app.crud.job_status import job_status
-from app.crud.job_log import job_log
-from app.models.job_status import JobType, JobExecutionStatus
-from app.models.movie import MovieCreate
+from app.crud import movie, media_category, job_status,  job_log
+from app.models.job_status import JobType
+from app.utils.movie_processor import process_movie_batch
 
 logger = logging.getLogger(__name__)
 
@@ -29,17 +23,17 @@ class CategoryRefreshJob:
         
         # Mapping of category names to TMDB client methods
         self.category_methods = {
-            "trending": "get_trending_movies",
-            "popular": "get_popular_movies", 
-            "top_rated": "get_top_rated_movies",
-            "upcoming": "get_upcoming_movies",
-            "now_playing": "get_now_playing_movies",
-            "bollywood": "get_bollywood_movies",
-            "tollywood": "get_tollywood_movies",
-            "kollywood": "get_kollywood_movies",
-            "mollywood": "get_mollywood_movies",
-            "sandalwood": "get_sandalwood_movies",
-            "hollywood": "get_hollywood_movies"
+            "Trending": "get_trending_movies",
+            "Popular": "get_popular_movies", 
+            "Top Rated": "get_top_rated_movies",
+            "Upcoming": "get_upcoming_movies",
+            "Now Playing": "get_now_playing_movies",
+            "Bollywood": "get_bollywood_movies",
+            "Tollywood": "get_tollywood_movies",
+            "Kollywood": "get_kollywood_movies",
+            "Mollywood": "get_mollywood_movies",
+            "Sandalwood": "get_sandalwood_movies",
+            "Hollywood": "get_hollywood_movies"
         }
     
     async def run(self):
@@ -57,7 +51,7 @@ class CategoryRefreshJob:
                 # Filter categories that have matching methods
                 valid_categories = [
                     cat for cat in categories 
-                    if cat.name.lower() in self.category_methods
+                    if cat.name in self.category_methods
                 ]
                 
                 if not valid_categories:
@@ -166,7 +160,7 @@ class CategoryRefreshJob:
             processed_count = 0
             
             # Get the TMDB method for this category
-            method_name = self.category_methods.get(category.name.lower())
+            method_name = self.category_methods.get(category.name)
             if not method_name:
                 await job_log.log_error(
                     db,
@@ -198,16 +192,12 @@ class CategoryRefreshJob:
             
             movies = response.movies[:MOVIES_PER_CATEGORY]  # Limit to MOVIES_PER_CATEGORY
             
-            # Extract movie IDs for updating category
-            new_movie_ids = []
-            
-            # Process each movie
+            # Extract movie IDs for processing
+            movie_ids = []
             for movie_data in movies:
-                movie_id = movie_data.tmdb_id
+                movie_id = movie_data.id  # Use .id instead of .tmdb_id
                 if not movie_id:
                     continue
-                
-                new_movie_ids.append(movie_id)
                 
                 # Check Redis lock for this movie ID
                 lock_acquired = await redis_client.acquire_movie_lock(movie_id)
@@ -219,21 +209,23 @@ class CategoryRefreshJob:
                     )
                     continue
                 
-                try:
-                    await self._process_category_movie(db, job_id, movie_id, category.name)
-                    processed_count += 1
-                    
-                    # Add delay between API calls
-                    await asyncio.sleep(API_DELAY)
-                    
-                finally:
-                    # Always release the lock
+                movie_ids.append(movie_id)
+            
+            # Process movies in batch using utility function
+            processed_count = 0
+            if movie_ids:
+                processed_count = await process_movie_batch(
+                    db, self.tmdb_client, movie_ids, job_id
+                )
+                
+                # Release locks for all processed movies
+                for movie_id in movie_ids:
                     await redis_client.release_movie_lock(movie_id)
             
             # Update category with new movie IDs
             # First, get the actual movie IDs from our database (not TMDB IDs)
             db_movie_ids = []
-            for tmdb_id in new_movie_ids:
+            for tmdb_id in movie_ids:
                 existing_movie = await movie.get_by_tmdb_id(db, tmdb_id)
                 if existing_movie:
                     db_movie_ids.append(existing_movie.id)
@@ -261,95 +253,6 @@ class CategoryRefreshJob:
             # Don't re-raise here, continue with other categories
             logger.error(f"Error refreshing category {category.name}: {str(e)}", exc_info=True)
             return 0
-    
-    async def _process_category_movie(self, db: AsyncSession, job_id: int, movie_id: int, category_name: str):
-        """Process a movie from category: fetch details, keywords, and upsert to database."""
-        try:
-            await job_log.log_info(
-                db,
-                job_id,
-                f"Processing {category_name} movie {movie_id}"
-            )
-            
-            # Fetch movie details
-            movie_details = await self.tmdb_client.get_movie_by_id(movie_id)
-            if not movie_details:
-                await job_log.log_warning(
-                    db,
-                    job_id,
-                    f"Could not fetch details for {category_name} movie {movie_id}"
-                )
-                return
-            
-            # Fetch movie keywords
-            keywords_response = await self.tmdb_client.get_movie_keywords(movie_id)
-            
-            # Add delay after API calls
-            await asyncio.sleep(API_DELAY)
-            
-            # Process genres
-            genre_ids = []
-            if movie_details.genres:
-                for genre_data in movie_details.genres:
-                    genre_obj = await genre.upsert_genre(
-                        db,
-                        genre_id=genre_data.id,
-                        name=genre_data.name
-                    )
-                    genre_ids.append(genre_obj.id)
-            
-            # Process keywords
-            keyword_db_ids = []
-            for kw in keywords_response.keywords:
-                keyword_obj = await keyword.upsert_keyword(
-                    db,
-                    keyword_id=kw.id,
-                    name=kw.name
-                )
-                keyword_db_ids.append(keyword_obj.id)
-            
-            # Create movie object
-            movie_create = MovieCreate(
-                tmdb_id=movie_details.tmdb_id,
-                title=movie_details.title,
-                original_title=movie_details.original_title,
-                overview=movie_details.overview or "",
-                release_date=movie_details.release_date,
-                runtime=movie_details.runtime,
-                budget=movie_details.budget or 0,
-                revenue=movie_details.revenue or 0,
-                vote_average=movie_details.vote_average,
-                vote_count=movie_details.vote_count,
-                popularity=movie_details.popularity,
-                poster_path=movie_details.poster_path,
-                backdrop_path=movie_details.backdrop_path,
-                adult=movie_details.adult,
-                original_language=movie_details.original_language,
-                status=movie_details.status or "",
-            )
-            
-            # Upsert movie with relationships
-            movie_obj = await movie.upsert_movie_with_relationships(
-                db,
-                movie_create=movie_create,
-                genre_ids=genre_ids,
-                keyword_ids=keyword_db_ids
-            )
-            
-            await job_log.log_info(
-                db,
-                job_id,
-                f"Successfully processed {category_name} movie: {movie_obj.title} (ID: {movie_obj.tmdb_id})"
-            )
-            
-        except Exception as e:
-            await job_log.log_error(
-                db,
-                job_id,
-                f"Error processing {category_name} movie {movie_id}: {str(e)}"
-            )
-            # Don't re-raise here, continue with other movies
-            logger.error(f"Error processing {category_name} movie {movie_id}: {str(e)}", exc_info=True)
 
 
 # Job instance for scheduler

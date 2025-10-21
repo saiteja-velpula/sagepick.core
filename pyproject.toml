@@ -2,7 +2,8 @@
 name = "sagepick-core"
 version = "0.1.0"
 authors = [
-    { name = "geetheswar-v", email = "geetheswar.edu@gmail.com" }
+    { name = "geetheswar-v", email = "geetheswar.edu@gmail.com" },
+    { name = "saiteja-velpula", email = "saitejavelpula.nss@gmail.com" }
 ]
 description = "Sagepick Core Backend Service"
 readme = "README.md"
