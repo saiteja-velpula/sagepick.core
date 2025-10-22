@@ -126,6 +126,7 @@ class ChangeTrackingJob:
                 
                 # Process each changed movie
                 movie_ids = []
+                skipped_locked = 0
                 for movie_data in changed_movies:
                     movie_id = movie_data.id
                     if not movie_id:
@@ -134,11 +135,7 @@ class ChangeTrackingJob:
                     # Check Redis lock for this movie ID
                     lock_acquired = await redis_client.acquire_movie_lock(movie_id)
                     if not lock_acquired:
-                        await job_log.log_info(
-                            db,
-                            job_id,
-                            f"Skipping movie {movie_id} - locked by another job"
-                        )
+                        skipped_locked += 1
                         continue
                     
                     movie_ids.append(movie_id)
@@ -153,6 +150,13 @@ class ChangeTrackingJob:
                     # Release locks for all processed movies
                     for movie_id in movie_ids:
                         await redis_client.release_movie_lock(movie_id)
+
+                if skipped_locked:
+                    await job_log.log_info(
+                        db,
+                        job_id,
+                        f"Skipped {skipped_locked} changed movies on page {current_page} due to existing locks"
+                    )
                 
                 current_page += 1
                 

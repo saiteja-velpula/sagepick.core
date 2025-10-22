@@ -9,7 +9,7 @@ from .settings import settings
 async_database_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
 engine = create_async_engine(
     async_database_url,
-    echo=True,
+    echo=False,
     future=True,
 )
 

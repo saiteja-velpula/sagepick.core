@@ -136,6 +136,7 @@ class MovieDiscoveryJob:
             
             # Process movies (limit to ITEMS_PER_RUN)
             movie_ids = []
+            skipped_locked = 0
             for movie_data in movies[:ITEMS_PER_RUN]:
                 movie_id = movie_data.tmdb_id
                 if not movie_id:
@@ -144,11 +145,7 @@ class MovieDiscoveryJob:
                 # Check Redis lock for this movie ID
                 lock_acquired = await redis_client.acquire_movie_lock(movie_id)
                 if not lock_acquired:
-                    await job_log.log_info(
-                        db,
-                        job_id,
-                        f"Skipping movie {movie_id} - locked by another job"
-                    )
+                    skipped_locked += 1
                     continue
                 
                 movie_ids.append(movie_id)
@@ -163,6 +160,13 @@ class MovieDiscoveryJob:
                 # Release locks for all processed movies
                 for movie_id in movie_ids:
                     await redis_client.release_movie_lock(movie_id)
+
+            if skipped_locked:
+                await job_log.log_info(
+                    db,
+                    job_id,
+                    f"Skipped {skipped_locked} movies on page {self.current_page} due to existing locks"
+                )
             
             # Reset to page 1 if we've reached the end
             if self.current_page >= total_pages:

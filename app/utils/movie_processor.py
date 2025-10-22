@@ -12,13 +12,6 @@ logger = logging.getLogger(__name__)
 
 async def process_tmdb_movie(db: AsyncSession, tmdb_client: TMDBClient, movie_id: int, job_id: Optional[int] = None) -> Optional[Movie]:
     try:
-        if job_id:
-            await job_log.log_info(
-                db,
-                job_id,
-                f"Processing movie {movie_id}"
-            )
-        
         # Fetch movie details from TMDB
         movie_details = await tmdb_client.get_movie_by_id(movie_id)
         if not movie_details:
@@ -85,13 +78,6 @@ async def process_tmdb_movie(db: AsyncSession, tmdb_client: TMDBClient, movie_id
             genre_ids=genre_ids,
             keyword_ids=keyword_db_ids
         )
-        
-        if job_id:
-            await job_log.log_info(
-                db,
-                job_id,
-                f"Successfully processed movie: {movie_obj.title} (ID: {movie_obj.tmdb_id})"
-            )
         
         return movie_obj
         

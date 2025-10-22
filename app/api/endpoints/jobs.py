@@ -194,39 +194,6 @@ async def delete_job_status(
     return {"message": f"Job status {job_id} and its logs have been deleted"}
 
 
-@router.get("/status/running", response_model=List[JobStatusRead])
-async def get_running_jobs(db: AsyncSession = Depends(get_session)):
-    """Get all currently running jobs."""
-    return await job_status.get_running_jobs(db)
-
-
-@router.get("/status/type/{job_type}", response_model=List[JobStatusRead])
-async def get_job_statuses_by_type(
-    job_type: JobType,
-    limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_session)
-):
-    """Get job statuses by job type."""
-    return await job_status.get_jobs_by_type(db, job_type, limit=limit)
-
-
-@router.get("/status/{job_id}", response_model=JobStatusRead)
-async def get_job_status(
-    job_id: int,
-    db: AsyncSession = Depends(get_session)
-):
-    """Get status of a specific job execution."""
-    job_status_obj = await job_status.get(db, job_id)
-    
-    if not job_status_obj:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Job status not found"
-        )
-    
-    return job_status_obj
-
-
 # Job Logs Endpoints
 @router.get("/logs", response_model=List[JobLogRead])
 async def get_recent_job_logs(
@@ -273,66 +240,6 @@ async def get_job_logs(
                 detail="Job status not found"
             )
     return logs
-
-
-@router.get("/status/failed", response_model=List[JobStatusRead])
-async def get_failed_jobs(
-    limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_session)
-):
-    """Get recently failed jobs."""
-    from sqlmodel import select
-    statement = select(job_status.model).where(
-        job_status.model.status == JobExecutionStatus.FAILED
-    ).order_by(job_status.model.created_at.desc()).limit(limit)
-    result = await db.execute(statement)
-    return result.scalars().all()
-
-
-@router.get("/status/completed", response_model=List[JobStatusRead])
-async def get_completed_jobs(
-    limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_session)
-):
-    """Get recently completed jobs."""
-    from sqlmodel import select
-    statement = select(job_status.model).where(
-        job_status.model.status == JobExecutionStatus.COMPLETED
-    ).order_by(job_status.model.created_at.desc()).limit(limit)
-    result = await db.execute(statement)
-    return result.scalars().all()
-
-
-@router.delete("/status/{job_id}")
-async def delete_job_status(
-    job_id: int,
-    db: AsyncSession = Depends(get_session)
-):
-    """Delete a job status record and its associated logs."""
-    job_status_obj = await job_status.get(db, job_id)
-    
-    if not job_status_obj:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Job status not found"
-        )
-    
-    # Check if job is currently running
-    if job_status_obj.status == JobExecutionStatus.RUNNING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete a running job"
-        )
-    
-    # Delete associated logs first
-    from sqlmodel import select, delete
-    logs_statement = delete(job_log.model).where(job_log.model.job_status_id == job_id)
-    await db.execute(logs_statement)
-    
-    # Delete the job status
-    await job_status.remove(db, id=job_id)
-    
-    return {"message": f"Job status {job_id} and its logs have been deleted"}
 
 
 # Job Management Endpoints

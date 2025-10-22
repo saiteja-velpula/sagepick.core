@@ -194,6 +194,7 @@ class CategoryRefreshJob:
             
             # Extract movie IDs for processing
             movie_ids = []
+            skipped_locked = 0
             for movie_data in movies:
                 movie_id = movie_data.id  # Use .id instead of .tmdb_id
                 if not movie_id:
@@ -202,11 +203,7 @@ class CategoryRefreshJob:
                 # Check Redis lock for this movie ID
                 lock_acquired = await redis_client.acquire_movie_lock(movie_id)
                 if not lock_acquired:
-                    await job_log.log_info(
-                        db,
-                        job_id,
-                        f"Skipping movie {movie_id} - locked by another job"
-                    )
+                    skipped_locked += 1
                     continue
                 
                 movie_ids.append(movie_id)
@@ -221,6 +218,13 @@ class CategoryRefreshJob:
                 # Release locks for all processed movies
                 for movie_id in movie_ids:
                     await redis_client.release_movie_lock(movie_id)
+
+            if skipped_locked:
+                await job_log.log_info(
+                    db,
+                    job_id,
+                    f"Skipped {skipped_locked} movies for category '{category.name}' due to existing locks"
+                )
             
             # Update category with new movie IDs
             # First, get the actual movie IDs from our database (not TMDB IDs)
