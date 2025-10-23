@@ -6,12 +6,12 @@ from app.core.redis import redis_client
 from app.services.tmdb_client.client import TMDBClient
 from app.crud import job_status, job_log
 from app.models.job_status import JobType
-from app.utils.movie_processor import process_movie_batch
+from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
 logger = logging.getLogger(__name__)
 
-API_DELAY = 0.5  # 500ms delay between API calls
 ITEMS_PER_PAGE = 100  # TMDB returns up to 100 items per page for changes
+ERROR_RATE_THRESHOLD = 0.9
 
 
 class ChangeTrackingJob:
@@ -50,23 +50,61 @@ class ChangeTrackingJob:
                 self.tmdb_client = TMDBClient()
                 
                 # Track changes and process movies
-                processed_count = await self._track_changes(db_session, job_id)
-                
-                # Update job progress
+                batch_result = await self._track_changes(db_session, job_id)
+
                 await job_log.log_info(
                     db_session,
                     job_id,
-                    f"Processed {processed_count} changed movies successfully"
+                    (
+                        "Change tracking summary: "
+                        f"{batch_result.succeeded} succeeded, "
+                        f"{batch_result.failed} failed out of {batch_result.attempted} attempts"
+                        + (
+                            f" ({batch_result.skipped_locked} skipped due to locks)"
+                            if batch_result.skipped_locked
+                            else ""
+                        )
+                    )
                 )
-                
-                # Mark job as completed
-                await job_status.complete_job(
-                    db_session, 
-                    job_id, 
-                    items_processed=processed_count
+
+                failure_rate = (
+                    batch_result.failed / batch_result.attempted
+                    if batch_result.attempted > 0
+                    else 0
                 )
-                
-                logger.info(f"Change Tracking Job completed successfully. Processed {processed_count} changed movies.")
+
+                if batch_result.attempted > 0 and failure_rate >= ERROR_RATE_THRESHOLD:
+                    await job_log.log_error(
+                        db_session,
+                        job_id,
+                        (
+                            "Change tracking encountered a high failure rate "
+                            f"({failure_rate:.0%}); marking job as failed"
+                        )
+                    )
+                    await job_status.fail_job(
+                        db_session,
+                        job_id,
+                        processed_items=batch_result.succeeded,
+                        failed_items=batch_result.failed
+                    )
+                    logger.error(
+                        "Change Tracking Job failed due to error rate %.0f%%",
+                        failure_rate * 100
+                    )
+                else:
+                    await job_status.complete_job(
+                        db_session,
+                        job_id,
+                        items_processed=batch_result.succeeded,
+                        failed_items=batch_result.failed
+                    )
+
+                    logger.info(
+                        "Change Tracking Job completed successfully. Processed %d changed movies.",
+                        batch_result.succeeded
+                    )
+
                 break
                 
             except Exception as e:
@@ -78,17 +116,20 @@ class ChangeTrackingJob:
                         job_id,
                         f"Job failed with error: {str(e)}"
                     )
-                    await job_status.fail_job(db_session, job_id, str(e))
+                    await job_status.fail_job(db_session, job_id)
                 
                 raise
             finally:
                 if self.tmdb_client:
                     await self.tmdb_client.close()
     
-    async def _track_changes(self, db: AsyncSession, job_id: int) -> int:
+    async def _track_changes(self, db: AsyncSession, job_id: int) -> BatchProcessResult:
         """Track changes from TMDB changes endpoint."""
         try:
-            processed_count = 0
+            total_attempted = 0
+            total_succeeded = 0
+            total_failed = 0
+            total_skipped_locked = 0
             current_page = 1
             total_pages = 1
             
@@ -125,38 +166,28 @@ class ChangeTrackingJob:
                     await job_status.update_total_items(db, job_id, estimated_total)
                 
                 # Process each changed movie
-                movie_ids = []
-                skipped_locked = 0
-                for movie_data in changed_movies:
-                    movie_id = movie_data.id
-                    if not movie_id:
-                        continue
-                    
-                    # Check Redis lock for this movie ID
-                    lock_acquired = await redis_client.acquire_movie_lock(movie_id)
-                    if not lock_acquired:
-                        skipped_locked += 1
-                        continue
-                    
-                    movie_ids.append(movie_id)
-                
+                movie_ids = [movie_data.id for movie_data in changed_movies if movie_data.id]
+
                 # Process movies in batch using utility function
                 if movie_ids:
-                    batch_processed = await process_movie_batch(
-                        db, self.tmdb_client, movie_ids, job_id
-                    )
-                    processed_count += batch_processed
-                    
-                    # Release locks for all processed movies
-                    for movie_id in movie_ids:
-                        await redis_client.release_movie_lock(movie_id)
-
-                if skipped_locked:
-                    await job_log.log_info(
+                    batch_result = await process_movie_batch(
                         db,
+                        self.tmdb_client,
+                        movie_ids,
                         job_id,
-                        f"Skipped {skipped_locked} changed movies on page {current_page} due to existing locks"
+                        use_locks=True
                     )
+                    total_attempted += batch_result.attempted
+                    total_succeeded += batch_result.succeeded
+                    total_failed += batch_result.failed
+                    total_skipped_locked += batch_result.skipped_locked
+
+                    if batch_result.skipped_locked:
+                        await job_log.log_info(
+                            db,
+                            job_id,
+                            f"Skipped {batch_result.skipped_locked} changed movies on page {current_page} due to existing locks"
+                        )
                 
                 current_page += 1
                 
@@ -165,10 +196,15 @@ class ChangeTrackingJob:
                     await job_log.log_info(
                         db,
                         job_id,
-                        f"Progress: Processed {processed_count} movies, on page {current_page}/{total_pages}"
+                        f"Progress: Processed {total_succeeded} movies, on page {current_page}/{total_pages}"
                     )
             
-            return processed_count
+            return BatchProcessResult(
+                attempted=total_attempted,
+                succeeded=total_succeeded,
+                failed=total_failed,
+                skipped_locked=total_skipped_locked
+            )
             
         except Exception as e:
             await job_log.log_error(

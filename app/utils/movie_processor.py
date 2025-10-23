@@ -1,13 +1,23 @@
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.tmdb_client.client import TMDBClient
-from app.crud import movie, genre, keyword, job_log
+from app.crud import movie, genre, keyword, job_log, job_status
+from app.core.redis import redis_client
 from app.models.movie import Movie, MovieCreate
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BatchProcessResult:
+    attempted: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    skipped_locked: int = 0
 
 
 async def process_tmdb_movie(db: AsyncSession, tmdb_client: TMDBClient, movie_id: int, job_id: Optional[int] = None) -> Optional[Movie]:
@@ -96,20 +106,76 @@ async def process_movie_batch(
     db: AsyncSession,
     tmdb_client: TMDBClient,
     movie_ids: List[int],
-    job_id: Optional[int] = None
-) -> int:
-    processed_count = 0
-    
+    job_id: Optional[int] = None,
+    *,
+    use_locks: bool = False
+) -> BatchProcessResult:
+    result_summary = BatchProcessResult()
+
     for movie_id in movie_ids:
-        result = await process_tmdb_movie(db, tmdb_client, movie_id, job_id)
-        if result:
-            processed_count += 1
-    
+        result_summary.attempted += 1
+
+        lock_acquired = True
+        if use_locks:
+            try:
+                lock_acquired = await redis_client.acquire_movie_lock(movie_id)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                lock_acquired = False
+                logger.error("Failed to acquire lock for movie %s: %s", movie_id, exc, exc_info=True)
+
+        if not lock_acquired:
+            result_summary.failed += 1
+            result_summary.skipped_locked += 1
+            if job_id:
+                await job_log.log_info(
+                    db,
+                    job_id,
+                    f"Skipped movie {movie_id} due to existing lock"
+                )
+                await job_status.increment_counts(db, job_id, failed_delta=1)
+            continue
+
+        try:
+            processed_movie = await process_tmdb_movie(db, tmdb_client, movie_id, job_id)
+            if processed_movie:
+                result_summary.succeeded += 1
+                if job_id:
+                    await job_status.increment_counts(db, job_id, processed_delta=1)
+            else:
+                result_summary.failed += 1
+                if job_id:
+                    await job_status.increment_counts(db, job_id, failed_delta=1)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            result_summary.failed += 1
+            if job_id:
+                await job_log.log_error(
+                    db,
+                    job_id,
+                    f"Unhandled error processing movie {movie_id}: {str(exc)}"
+                )
+                await job_status.increment_counts(db, job_id, failed_delta=1)
+            logger.error("Unhandled error processing movie %s: %s", movie_id, exc, exc_info=True)
+        finally:
+            if use_locks and lock_acquired:
+                try:
+                    await redis_client.release_movie_lock(movie_id)
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error("Failed to release lock for movie %s: %s", movie_id, exc, exc_info=True)
+
     if job_id:
         await job_log.log_info(
             db,
             job_id,
-            f"Batch processing complete: {processed_count}/{len(movie_ids)} movies processed successfully"
+            (
+                "Batch processing complete: "
+                f"{result_summary.succeeded}/{result_summary.attempted} succeeded, "
+                f"{result_summary.failed} failed"
+                + (
+                    f" ({result_summary.skipped_locked} skipped due to locks)"
+                    if result_summary.skipped_locked
+                    else ""
+                )
+            )
         )
-    
-    return processed_count
+
+    return result_summary

@@ -15,38 +15,48 @@ class JobScheduler:
     """Manages all scheduled jobs for SAGEPICK."""
     
     def __init__(self):
-        # Configure job stores
+        self._job_ids = {
+            'movie_discovery_job',
+            'change_tracking_job',
+            'category_refresh_job'
+        }
+        self._create_scheduler()
+
+    def _create_scheduler(self):
+        """Create a fresh scheduler instance with default configuration."""
         jobstores = {
             'default': MemoryJobStore()
         }
-        
-        # Configure executors
+
         executors = {
             'default': AsyncIOExecutor()
         }
-        
-        # Job defaults
+
         job_defaults = {
-            'coalesce': True,  # Combine multiple pending executions into one
-            'max_instances': 1,  # Only one instance of each job can run at a time
-            'misfire_grace_time': 30  # 30 seconds grace time for missed jobs
+            'coalesce': True,
+            'max_instances': 1,
+            'misfire_grace_time': 30
         }
-        
-        # Initialize scheduler
+
         self.scheduler = AsyncIOScheduler(
             jobstores=jobstores,
             executors=executors,
             job_defaults=job_defaults,
             timezone='UTC'
         )
-        
         self._jobs_configured = False
     
     def configure_jobs(self):
         """Configure all scheduled jobs."""
         if self._jobs_configured:
-            logger.warning("Jobs already configured, skipping...")
-            return
+            missing_jobs = [job_id for job_id in self._job_ids if not self.scheduler.get_job(job_id)]
+            if not missing_jobs:
+                logger.debug("Jobs already configured, skipping configuration")
+                return
+            logger.warning(
+                "Detected missing jobs on scheduler restart, reconfiguring: %s",
+                ", ".join(missing_jobs)
+            )
         
         try:
             # Job 1: Movie Discovery Job - Every 5 minutes
@@ -90,8 +100,11 @@ class JobScheduler:
     async def start(self):
         """Start the scheduler."""
         try:
-            if not self._jobs_configured:
-                self.configure_jobs()
+            if self.scheduler.running:
+                logger.info("Job scheduler already running")
+                return
+
+            self.configure_jobs()
             
             self.scheduler.start()
             logger.info("Job scheduler started successfully")
@@ -107,11 +120,17 @@ class JobScheduler:
     async def stop(self):
         """Stop the scheduler."""
         try:
-            self.scheduler.shutdown(wait=True)
-            logger.info("Job scheduler stopped successfully")
+            if self.scheduler.running:
+                self.scheduler.shutdown(wait=True)
+                logger.info("Job scheduler stopped successfully")
+            else:
+                logger.info("Job scheduler already stopped")
         except Exception as e:
             logger.error(f"Failed to stop scheduler: {str(e)}")
             raise
+        finally:
+            # Reset the scheduler so a subsequent start creates fresh jobs
+            self._create_scheduler()
     
     def get_job_status(self, job_id: str) -> dict:
         """Get status of a specific job."""

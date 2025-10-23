@@ -26,8 +26,6 @@ class JobStatusBase(SQLModel):
     total_items: Optional[int] = Field(default=None, description="Total items to process")
     processed_items: int = Field(default=0, description="Items processed so far")
     failed_items: int = Field(default=0, description="Items that failed processing")
-    error_message: Optional[str] = Field(default=None, description="Error message if job failed")
-    job_metadata: Optional[str] = Field(default=None, description="Additional job metadata as JSON")
 
 
 class JobStatus(JobStatusBase, table=True):
@@ -49,8 +47,6 @@ class JobStatusUpdate(SQLModel):
     total_items: Optional[int] = None
     processed_items: Optional[int] = None
     failed_items: Optional[int] = None
-    error_message: Optional[str] = None
-    job_metadata: Optional[str] = None
 
 
 class JobStatusRead(JobStatusBase):

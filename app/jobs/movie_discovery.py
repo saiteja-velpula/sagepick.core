@@ -5,14 +5,15 @@ from app.core.db import get_session
 from app.core.redis import redis_client
 from app.services.tmdb_client.client import TMDBClient
 from app.services.tmdb_client.models import MovieSearchParams
-from app.crud import job_status, job_log
+from app.crud import job_status, job_log, movie_discovery_state
 from app.models import JobType
-from app.utils.movie_processor import process_movie_batch
+from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
 logger = logging.getLogger(__name__)
 
 ITEMS_PER_RUN = 20
 API_DELAY = 0.5  # 500ms delay between API calls
+ERROR_RATE_THRESHOLD = 0.9
 
 
 class MovieDiscoveryJob:
@@ -48,39 +49,72 @@ class MovieDiscoveryJob:
                 # Initialize Redis client
                 await redis_client.initialize()
                 
-                # Get current page from Redis or start from 1
-                job_state = await redis_client.get_job_state(self.job_type.value)
-                if job_state and "current_page" in job_state:
-                    self.current_page = job_state["current_page"]
+                # Load last persisted page from the database
+                self.current_page = await movie_discovery_state.get_current_page(db_session)
                 
                 # Initialize TMDB client
                 self.tmdb_client = TMDBClient()
                 
                 # Fetch and process movies
-                processed_count = await self._discover_movies(db_session, job_id)
-                
-                # Update job progress
+                batch_result = await self._discover_movies(db_session, job_id)
+
                 await job_log.log_info(
                     db_session,
                     job_id,
-                    f"Processed {processed_count} movies successfully"
+                    (
+                        "Movie discovery summary: "
+                        f"{batch_result.succeeded} succeeded, "
+                        f"{batch_result.failed} failed out of {batch_result.attempted} attempts"
+                        + (
+                            f" ({batch_result.skipped_locked} skipped due to locks)"
+                            if batch_result.skipped_locked
+                            else ""
+                        )
+                    )
                 )
-                
-                # Mark job as completed
-                await job_status.complete_job(
-                    db_session, 
-                    job_id, 
-                    items_processed=processed_count
+
+                failure_rate = (
+                    batch_result.failed / batch_result.attempted
+                    if batch_result.attempted > 0
+                    else 0
                 )
-                
-                # Update current page in Redis for next run
-                self.current_page += 1
-                await redis_client.set_job_state(
-                    self.job_type.value, 
-                    {"current_page": self.current_page}
-                )
-                
-                logger.info(f"Movie Discovery Job completed successfully. Processed {processed_count} movies.")
+
+                if batch_result.attempted > 0 and failure_rate >= ERROR_RATE_THRESHOLD:
+                    await job_log.log_error(
+                        db_session,
+                        job_id,
+                        (
+                            "Movie discovery encountered a high failure rate "
+                            f"({failure_rate:.0%}); marking job as failed"
+                        )
+                    )
+                    await job_status.fail_job(
+                        db_session,
+                        job_id,
+                        processed_items=batch_result.succeeded,
+                        failed_items=batch_result.failed
+                    )
+                    logger.error(
+                        "Movie Discovery Job failed due to error rate %.0f%%",
+                        failure_rate * 100
+                    )
+                else:
+                    await job_status.complete_job(
+                        db_session,
+                        job_id,
+                        items_processed=batch_result.succeeded,
+                        failed_items=batch_result.failed
+                    )
+
+                    # Persist the next page for the upcoming run
+                    self.current_page += 1
+                    await movie_discovery_state.update_current_page(db_session, self.current_page)
+
+                    logger.info(
+                        "Movie Discovery Job completed successfully. Processed %d movies.",
+                        batch_result.succeeded
+                    )
+
                 break
                 
             except Exception as e:
@@ -92,14 +126,14 @@ class MovieDiscoveryJob:
                         job_id,
                         f"Job failed with error: {str(e)}"
                     )
-                    await job_status.fail_job(db_session, job_id, str(e))
+                    await job_status.fail_job(db_session, job_id)
                 
                 raise
             finally:
                 if self.tmdb_client:
                     await self.tmdb_client.close()
     
-    async def _discover_movies(self, db: AsyncSession, job_id: int) -> int:
+    async def _discover_movies(self, db: AsyncSession, job_id: int) -> BatchProcessResult:
         """Discover movies from TMDB discover endpoint."""
         try:
             # Fetch discover page
@@ -123,7 +157,7 @@ class MovieDiscoveryJob:
                     job_id,
                     f"No movies found on page {self.current_page}"
                 )
-                return 0
+                return BatchProcessResult()
             
             movies = discover_response.movies
             total_pages = discover_response.pagination.total_pages
@@ -135,37 +169,23 @@ class MovieDiscoveryJob:
             )
             
             # Process movies (limit to ITEMS_PER_RUN)
-            movie_ids = []
-            skipped_locked = 0
-            for movie_data in movies[:ITEMS_PER_RUN]:
-                movie_id = movie_data.tmdb_id
-                if not movie_id:
-                    continue
-                
-                # Check Redis lock for this movie ID
-                lock_acquired = await redis_client.acquire_movie_lock(movie_id)
-                if not lock_acquired:
-                    skipped_locked += 1
-                    continue
-                
-                movie_ids.append(movie_id)
-            
-            # Process movies in batch using utility function
-            processed_count = 0
-            if movie_ids:
-                processed_count = await process_movie_batch(
-                    db, self.tmdb_client, movie_ids, job_id
-                )
-                
-                # Release locks for all processed movies
-                for movie_id in movie_ids:
-                    await redis_client.release_movie_lock(movie_id)
+            movie_ids = [movie_data.tmdb_id for movie_data in movies[:ITEMS_PER_RUN] if movie_data.tmdb_id]
 
-            if skipped_locked:
+            batch_result = BatchProcessResult()
+            if movie_ids:
+                batch_result = await process_movie_batch(
+                    db,
+                    self.tmdb_client,
+                    movie_ids,
+                    job_id,
+                    use_locks=True
+                )
+
+            if batch_result.skipped_locked:
                 await job_log.log_info(
                     db,
                     job_id,
-                    f"Skipped {skipped_locked} movies on page {self.current_page} due to existing locks"
+                    f"Skipped {batch_result.skipped_locked} movies on page {self.current_page} due to existing locks"
                 )
             
             # Reset to page 1 if we've reached the end
@@ -177,7 +197,7 @@ class MovieDiscoveryJob:
                     "Reached end of discover pages, resetting to page 1"
                 )
             
-            return processed_count
+            return batch_result
             
         except Exception as e:
             await job_log.log_error(

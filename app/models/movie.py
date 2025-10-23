@@ -1,5 +1,6 @@
 from typing import Optional, List, TYPE_CHECKING
 from datetime import date, datetime
+from sqlalchemy import BigInteger, Column
 from sqlmodel import SQLModel, Field, Relationship
 from .movie_genre import MovieGenre
 from .movie_keyword import MovieKeyword
@@ -14,8 +15,8 @@ if TYPE_CHECKING:
 class MovieBase(SQLModel):
     # Basic movie information
     tmdb_id: int = Field(unique=True, index=True, description="TMDB movie ID")
-    title: str = Field(max_length=500, description="Movie title")
-    original_title: str = Field(max_length=500, description="Original movie title")
+    title: str = Field(max_length=1000, description="Movie title")
+    original_title: str = Field(max_length=1000, description="Original movie title")
     overview: Optional[str] = Field(default=None, description="Movie overview/plot")
     
     # Paths and media
@@ -35,8 +36,16 @@ class MovieBase(SQLModel):
     
     # Other essential details
     runtime: Optional[int] = Field(default=None, description="Runtime in minutes")
-    budget: Optional[int] = Field(default=None, description="Budget in USD")
-    revenue: Optional[int] = Field(default=None, description="Revenue in USD")
+    budget: Optional[int] = Field(
+        default=None,
+        description="Budget in USD",
+        sa_column=Column(BigInteger, nullable=True, comment="Budget in USD")
+    )
+    revenue: Optional[int] = Field(
+        default=None,
+        description="Revenue in USD",
+        sa_column=Column(BigInteger, nullable=True, comment="Revenue in USD")
+    )
     status: Optional[str] = Field(default=None, max_length=50, description="Movie status (e.g., Released)")
     adult: bool = Field(default=False, description="Adult content flag")
 

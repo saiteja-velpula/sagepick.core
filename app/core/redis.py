@@ -1,8 +1,6 @@
 import redis.asyncio as redis
 from typing import Optional
-import json
 import logging
-from contextlib import asynccontextmanager
 
 from app.core.settings import settings
 
@@ -10,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class RedisClient:
-    """Redis client for job management and movie ID conflict resolution."""
+    """Redis client used for distributed movie-lock coordination."""
     
     def __init__(self):
         self.redis: Optional[redis.Redis] = None
@@ -86,77 +84,6 @@ class RedisClient:
             logger.error(f"Failed to extend movie lock for {movie_id}: {e}")
             return False
     
-    # Job state management
-    async def set_job_state(self, job_type: str, state: dict, ttl: int = 3600) -> bool:
-        """Set job state (like current page number for discovery job)."""
-        if not self.redis:
-            return False
-        
-        key = f"job_state:{job_type}"
-        try:
-            await self.redis.setex(key, ttl, json.dumps(state))
-            return True
-        except Exception as e:
-            logger.error(f"Failed to set job state for {job_type}: {e}")
-            return False
-    
-    async def get_job_state(self, job_type: str) -> Optional[dict]:
-        """Get job state."""
-        if not self.redis:
-            return None
-        
-        key = f"job_state:{job_type}"
-        try:
-            state_str = await self.redis.get(key)
-            if state_str:
-                return json.loads(state_str)
-            return None
-        except Exception as e:
-            logger.error(f"Failed to get job state for {job_type}: {e}")
-            return None
-    
-    async def delete_job_state(self, job_type: str) -> bool:
-        """Delete job state."""
-        if not self.redis:
-            return False
-        
-        key = f"job_state:{job_type}"
-        try:
-            result = await self.redis.delete(key)
-            return result > 0
-        except Exception as e:
-            logger.error(f"Failed to delete job state for {job_type}: {e}")
-            return False
-    
-    # Job progress tracking
-    async def set_job_progress(self, job_id: int, progress: dict, ttl: int = 86400) -> bool:
-        """Set job progress information."""
-        if not self.redis:
-            return False
-        
-        key = f"job_progress:{job_id}"
-        try:
-            await self.redis.setex(key, ttl, json.dumps(progress))
-            return True
-        except Exception as e:
-            logger.error(f"Failed to set job progress for {job_id}: {e}")
-            return False
-    
-    async def get_job_progress(self, job_id: int) -> Optional[dict]:
-        """Get job progress information."""
-        if not self.redis:
-            return None
-        
-        key = f"job_progress:{job_id}"
-        try:
-            progress_str = await self.redis.get(key)
-            if progress_str:
-                return json.loads(progress_str)
-            return None
-        except Exception as e:
-            logger.error(f"Failed to get job progress for {job_id}: {e}")
-            return None
-    
     # Utility methods
     async def health_check(self) -> bool:
         """Check if Redis is healthy."""
@@ -172,30 +99,3 @@ class RedisClient:
 
 # Global Redis client instance
 redis_client = RedisClient()
-
-
-@asynccontextmanager
-async def get_redis():
-    if not redis_client._initialized:
-        await redis_client.initialize()
-    yield redis_client
-
-
-async def acquire_movie_lock_safe(movie_id: int, timeout: int = 300) -> bool:
-    """Safe wrapper for acquiring movie locks."""
-    try:
-        async with get_redis() as redis_conn:
-            return await redis_conn.acquire_movie_lock(movie_id, timeout)
-    except Exception as e:
-        logger.error(f"Error acquiring movie lock for {movie_id}: {e}")
-        return False
-
-
-async def release_movie_lock_safe(movie_id: int) -> bool:
-    """Safe wrapper for releasing movie locks."""
-    try:
-        async with get_redis() as redis_conn:
-            return await redis_conn.release_movie_lock(movie_id)
-    except Exception as e:
-        logger.error(f"Error releasing movie lock for {movie_id}: {e}")
-        return False

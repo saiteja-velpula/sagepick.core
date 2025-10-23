@@ -8,12 +8,12 @@ from app.core.redis import redis_client
 from app.services.tmdb_client.client import TMDBClient
 from app.crud import movie, media_category, job_status,  job_log
 from app.models.job_status import JobType
-from app.utils.movie_processor import process_movie_batch
+from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
 logger = logging.getLogger(__name__)
 
-API_DELAY = 0.5  # 500ms delay between API calls
 MOVIES_PER_CATEGORY = 20  # Number of movies to fetch per category
+ERROR_RATE_THRESHOLD = 0.9
 
 
 class CategoryRefreshJob:
@@ -84,23 +84,62 @@ class CategoryRefreshJob:
                 self.tmdb_client = TMDBClient()
                 
                 # Process each category
-                processed_count = await self._refresh_categories(db_session, job_id, valid_categories)
-                
-                # Update job progress
+                batch_result = await self._refresh_categories(db_session, job_id, valid_categories)
+
                 await job_log.log_info(
                     db_session,
                     job_id,
-                    f"Processed {processed_count} movies across all categories successfully"
+                    (
+                        "Category refresh summary: "
+                        f"{batch_result.succeeded} succeeded, "
+                        f"{batch_result.failed} failed out of {batch_result.attempted} attempts"
+                        + (
+                            f" ({batch_result.skipped_locked} skipped due to locks)"
+                            if batch_result.skipped_locked
+                            else ""
+                        )
+                    )
                 )
-                
-                # Mark job as completed
-                await job_status.complete_job(
-                    db_session, 
-                    job_id, 
-                    items_processed=processed_count
+
+                failure_rate = (
+                    batch_result.failed / batch_result.attempted
+                    if batch_result.attempted > 0
+                    else 0
                 )
-                
-                logger.info(f"Category Refresh Job completed successfully. Processed {processed_count} movies across {len(valid_categories)} categories.")
+
+                if batch_result.attempted > 0 and failure_rate >= ERROR_RATE_THRESHOLD:
+                    await job_log.log_error(
+                        db_session,
+                        job_id,
+                        (
+                            "Category refresh encountered a high failure rate "
+                            f"({failure_rate:.0%}); marking job as failed"
+                        )
+                    )
+                    await job_status.fail_job(
+                        db_session,
+                        job_id,
+                        processed_items=batch_result.succeeded,
+                        failed_items=batch_result.failed
+                    )
+                    logger.error(
+                        "Category Refresh Job failed due to error rate %.0f%%",
+                        failure_rate * 100
+                    )
+                else:
+                    await job_status.complete_job(
+                        db_session,
+                        job_id,
+                        items_processed=batch_result.succeeded,
+                        failed_items=batch_result.failed
+                    )
+
+                    logger.info(
+                        "Category Refresh Job completed successfully. Processed %d movies across %d categories.",
+                        batch_result.succeeded,
+                        len(valid_categories)
+                    )
+
                 break
                 
             except Exception as e:
@@ -112,16 +151,19 @@ class CategoryRefreshJob:
                         job_id,
                         f"Job failed with error: {str(e)}"
                     )
-                    await job_status.fail_job(db_session, job_id, str(e))
+                    await job_status.fail_job(db_session, job_id)
                 
                 raise
             finally:
                 if self.tmdb_client:
                     await self.tmdb_client.close()
     
-    async def _refresh_categories(self, db: AsyncSession, job_id: int, categories: List) -> int:
+    async def _refresh_categories(self, db: AsyncSession, job_id: int, categories: List) -> BatchProcessResult:
         """Refresh all media categories with latest movies."""
-        total_processed = 0
+        total_attempted = 0
+        total_succeeded = 0
+        total_failed = 0
+        total_skipped_locked = 0
         
         try:
             for category in categories:
@@ -132,19 +174,27 @@ class CategoryRefreshJob:
                 )
                 
                 # Process this category
-                category_processed = await self._refresh_single_category(db, job_id, category)
-                total_processed += category_processed
+                category_result = await self._refresh_single_category(db, job_id, category)
+                total_attempted += category_result.attempted
+                total_succeeded += category_result.succeeded
+                total_failed += category_result.failed
+                total_skipped_locked += category_result.skipped_locked
                 
                 await job_log.log_info(
                     db,
                     job_id,
-                    f"Updated category '{category.name}' with {category_processed} movies"
+                    f"Updated category '{category.name}' with {category_result.succeeded} movies"
                 )
                 
                 # Small delay between categories
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(0.25)
             
-            return total_processed
+            return BatchProcessResult(
+                attempted=total_attempted,
+                succeeded=total_succeeded,
+                failed=total_failed,
+                skipped_locked=total_skipped_locked
+            )
             
         except Exception as e:
             await job_log.log_error(
@@ -154,10 +204,10 @@ class CategoryRefreshJob:
             )
             raise
     
-    async def _refresh_single_category(self, db: AsyncSession, job_id: int, category) -> int:
+    async def _refresh_single_category(self, db: AsyncSession, job_id: int, category) -> BatchProcessResult:
         """Refresh a single media category with latest movies."""
         try:
-            processed_count = 0
+            category_result = BatchProcessResult()
             
             # Get the TMDB method for this category
             method_name = self.category_methods.get(category.name)
@@ -167,7 +217,7 @@ class CategoryRefreshJob:
                     job_id,
                     f"No TMDB method found for category: {category.name}"
                 )
-                return 0
+                return category_result
             
             # Get the method from TMDB client
             tmdb_method = getattr(self.tmdb_client, method_name, None)
@@ -177,7 +227,7 @@ class CategoryRefreshJob:
                     job_id,
                     f"TMDB method {method_name} not found for category: {category.name}"
                 )
-                return 0
+                return category_result
             
             # Fetch movies from TMDB
             response = await tmdb_method(page=1)
@@ -188,42 +238,28 @@ class CategoryRefreshJob:
                     job_id,
                     f"No movies found for category: {category.name}"
                 )
-                return 0
+                return category_result
             
             movies = response.movies[:MOVIES_PER_CATEGORY]  # Limit to MOVIES_PER_CATEGORY
-            
-            # Extract movie IDs for processing
-            movie_ids = []
-            skipped_locked = 0
-            for movie_data in movies:
-                movie_id = movie_data.id  # Use .id instead of .tmdb_id
-                if not movie_id:
-                    continue
-                
-                # Check Redis lock for this movie ID
-                lock_acquired = await redis_client.acquire_movie_lock(movie_id)
-                if not lock_acquired:
-                    skipped_locked += 1
-                    continue
-                
-                movie_ids.append(movie_id)
-            
-            # Process movies in batch using utility function
-            processed_count = 0
-            if movie_ids:
-                processed_count = await process_movie_batch(
-                    db, self.tmdb_client, movie_ids, job_id
-                )
-                
-                # Release locks for all processed movies
-                for movie_id in movie_ids:
-                    await redis_client.release_movie_lock(movie_id)
 
-            if skipped_locked:
+            # Extract movie IDs for processing
+            movie_ids = [movie_data.tmdb_id for movie_data in movies if movie_data.tmdb_id]
+
+            # Process movies in batch using utility function
+            if movie_ids:
+                category_result = await process_movie_batch(
+                    db,
+                    self.tmdb_client,
+                    movie_ids,
+                    job_id,
+                    use_locks=True
+                )
+
+            if category_result.skipped_locked:
                 await job_log.log_info(
                     db,
                     job_id,
-                    f"Skipped {skipped_locked} movies for category '{category.name}' due to existing locks"
+                    f"Skipped {category_result.skipped_locked} movies for category '{category.name}' due to existing locks"
                 )
             
             # Update category with new movie IDs
@@ -246,7 +282,7 @@ class CategoryRefreshJob:
                 f"Updated category '{category.name}' movie associations with {len(db_movie_ids)} movies"
             )
             
-            return processed_count
+            return category_result
             
         except Exception as e:
             await job_log.log_error(
@@ -256,7 +292,7 @@ class CategoryRefreshJob:
             )
             # Don't re-raise here, continue with other categories
             logger.error(f"Error refreshing category {category.name}: {str(e)}", exc_info=True)
-            return 0
+            return category_result
 
 
 # Job instance for scheduler

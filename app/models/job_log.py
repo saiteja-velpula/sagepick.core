@@ -15,9 +15,6 @@ class JobLogBase(SQLModel):
     job_status_id: int = Field(foreign_key="job_status.id", description="Reference to job status")
     level: LogLevel = Field(default=LogLevel.INFO, description="Log level")
     message: str = Field(description="Log message")
-    details: Optional[str] = Field(default=None, description="Additional log details as JSON")
-    movie_id: Optional[int] = Field(default=None, description="Movie ID if log is related to specific movie")
-    category_name: Optional[str] = Field(default=None, description="Category name if log is related to specific category")
 
 
 class JobLog(JobLogBase, table=True):

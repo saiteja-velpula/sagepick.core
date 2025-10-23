@@ -117,7 +117,13 @@ class MovieDetails(BaseModel):
 
 class MovieChangeItem(BaseModel):
     id: int
-    adult: bool
+    adult: Optional[bool] = False
+
+    @field_validator('adult', mode='before')
+    def parse_adult(cls, v):
+        if v is None:
+            return False
+        return bool(v)
 
 
 # API response wrappers

@@ -43,7 +43,8 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
         self, 
         db: AsyncSession, 
         job_id: int, 
-        items_processed: Optional[int] = None
+        items_processed: Optional[int] = None,
+        failed_items: Optional[int] = None
     ) -> Optional[JobStatus]:
         job_status = await self.get(db, job_id)
         if job_status:
@@ -51,17 +52,51 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
             job_status.completed_at = datetime.utcnow()
             if items_processed is not None:
                 job_status.processed_items = items_processed
+            if failed_items is not None:
+                job_status.failed_items = failed_items
             db.add(job_status)
             await db.commit()
             await db.refresh(job_status)
         return job_status
     
-    async def fail_job(self, db: AsyncSession, job_id: int, error_message: str) -> Optional[JobStatus]:
+    async def fail_job(
+        self,
+        db: AsyncSession,
+        job_id: int,
+        processed_items: Optional[int] = None,
+        failed_items: Optional[int] = None
+    ) -> Optional[JobStatus]:
         job_status = await self.get(db, job_id)
         if job_status:
             job_status.status = JobExecutionStatus.FAILED
             job_status.completed_at = datetime.utcnow()
-            job_status.error_message = error_message
+            if processed_items is not None:
+                job_status.processed_items = processed_items
+            if failed_items is not None:
+                job_status.failed_items = failed_items
+            db.add(job_status)
+            await db.commit()
+            await db.refresh(job_status)
+        return job_status
+
+    async def increment_counts(
+        self,
+        db: AsyncSession,
+        job_id: int,
+        processed_delta: int = 0,
+        failed_delta: int = 0
+    ) -> Optional[JobStatus]:
+        """Increment processed/failed counters for a job and persist immediately."""
+        if not processed_delta and not failed_delta:
+            return await self.get(db, job_id)
+
+        job_status = await self.get(db, job_id)
+        if job_status:
+            if processed_delta:
+                job_status.processed_items += processed_delta
+            if failed_delta:
+                job_status.failed_items += failed_delta
+            job_status.updated_at = datetime.utcnow()
             db.add(job_status)
             await db.commit()
             await db.refresh(job_status)

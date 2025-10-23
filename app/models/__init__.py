@@ -14,6 +14,7 @@ from .job_status import (
     JobExecutionStatus
 )
 from .job_log import JobLog, JobLogCreate, JobLogRead, LogLevel
+from .movie_discovery_state import MovieDiscoveryState
 
 __all__ = [
     "Genre",
@@ -40,4 +41,5 @@ __all__ = [
     "JobLogCreate",
     "JobLogRead",
     "LogLevel",
+    "MovieDiscoveryState",
 ]

@@ -22,6 +22,9 @@ from app.models.genre import Genre
 from app.models.keyword import Keyword
 from app.models.movie import Movie
 from app.models.media_category import MediaCategory
+from app.models.job_status import JobStatus
+from app.models.job_log import JobLog
+from app.models.movie_discovery_state import MovieDiscoveryState
 from app.core.settings import settings
 
 # this is the Alembic Config object, which provides
