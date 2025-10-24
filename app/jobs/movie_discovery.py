@@ -1,8 +1,12 @@
+import asyncio
 import logging
+from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.redis import redis_client
+from app.core.job_execution import job_execution_manager
+from app.core.settings import settings
 from app.services.tmdb_client.client import TMDBClient
 from app.services.tmdb_client.models import MovieSearchParams
 from app.crud import job_status, job_log, movie_discovery_state
@@ -11,20 +15,18 @@ from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
 logger = logging.getLogger(__name__)
 
-ITEMS_PER_RUN = 20
-API_DELAY = 0.5  # 500ms delay between API calls
-ERROR_RATE_THRESHOLD = 0.9
-
 
 class MovieDiscoveryJob:
     def __init__(self):
         self.job_type = JobType.MOVIE_DISCOVERY
         self.tmdb_client = None
         self.current_page = 1
+        self.config = settings.JOBS
     
     async def run(self):
         """Main job execution method."""
         job_id = None
+        cancel_event = None
         
         async for db_session in get_session():
             try:
@@ -32,15 +34,16 @@ class MovieDiscoveryJob:
                 job_status_record = await job_status.create_job(
                     db_session, 
                     job_type=self.job_type,
-                    total_items=ITEMS_PER_RUN
+                    total_items=self.config.movie_items_per_run
                 )
                 job_id = job_status_record.id
+                cancel_event = await job_execution_manager.register(job_id, self.job_type)
                 
                 # Log job start
                 await job_log.log_info(
                     db_session,
                     job_id,
-                    f"Starting Movie Discovery Job - fetching {ITEMS_PER_RUN} movies"
+                    f"Starting Movie Discovery Job - fetching {self.config.movie_items_per_run} movies"
                 )
                 
                 # Mark job as running
@@ -56,7 +59,7 @@ class MovieDiscoveryJob:
                 self.tmdb_client = TMDBClient()
                 
                 # Fetch and process movies
-                batch_result = await self._discover_movies(db_session, job_id)
+                batch_result = await self._discover_movies(db_session, job_id, cancel_event)
 
                 await job_log.log_info(
                     db_session,
@@ -79,7 +82,10 @@ class MovieDiscoveryJob:
                     else 0
                 )
 
-                if batch_result.attempted > 0 and failure_rate >= ERROR_RATE_THRESHOLD:
+                if (
+                    batch_result.attempted > 0
+                    and failure_rate >= self.config.error_rate_threshold
+                ):
                     await job_log.log_error(
                         db_session,
                         job_id,
@@ -116,7 +122,21 @@ class MovieDiscoveryJob:
                     )
 
                 break
-                
+            except asyncio.CancelledError:
+                logger.warning("Movie Discovery Job cancellation requested")
+                if job_id:
+                    await job_log.log_warning(
+                        db_session,
+                        job_id,
+                        "Cancellation requested; aborting movie discovery run"
+                    )
+                    await job_status.cancel_job(
+                        db_session,
+                        job_id,
+                        processed_items=None,
+                        failed_items=None
+                    )
+                return
             except Exception as e:
                 logger.error(f"Movie Discovery Job failed: {str(e)}", exc_info=True)
                 
@@ -130,12 +150,22 @@ class MovieDiscoveryJob:
                 
                 raise
             finally:
+                if job_id is not None:
+                    await job_execution_manager.unregister(job_id)
                 if self.tmdb_client:
                     await self.tmdb_client.close()
     
-    async def _discover_movies(self, db: AsyncSession, job_id: int) -> BatchProcessResult:
+    async def _discover_movies(self, db: AsyncSession, job_id: int, cancel_event: Optional[asyncio.Event]) -> BatchProcessResult:
         """Discover movies from TMDB discover endpoint."""
         try:
+            if cancel_event and cancel_event.is_set():
+                await job_log.log_warning(
+                    db,
+                    job_id,
+                    "Cancellation requested before movie discovery page fetch"
+                )
+                return BatchProcessResult()
+            
             # Fetch discover page
             await job_log.log_info(
                 db,
@@ -168,8 +198,12 @@ class MovieDiscoveryJob:
                 f"Found {len(movies)} movies on page {self.current_page}/{total_pages}"
             )
             
-            # Process movies (limit to ITEMS_PER_RUN)
-            movie_ids = [movie_data.tmdb_id for movie_data in movies[:ITEMS_PER_RUN] if movie_data.tmdb_id]
+            # Process movies (limit to configured batch size)
+            movie_ids = [
+                movie_data.tmdb_id
+                for movie_data in movies[: self.config.movie_items_per_run]
+                if movie_data.tmdb_id
+            ]
 
             batch_result = BatchProcessResult()
             if movie_ids:
@@ -178,7 +212,8 @@ class MovieDiscoveryJob:
                     self.tmdb_client,
                     movie_ids,
                     job_id,
-                    use_locks=True
+                    use_locks=True,
+                    cancel_event=cancel_event
                 )
 
             if batch_result.skipped_locked:

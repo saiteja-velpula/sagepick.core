@@ -7,6 +7,7 @@ from math import ceil
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, func
+from sqlalchemy import or_
 
 from app.core.db import get_session
 from app.crud.movie import movie as movie_crud
@@ -50,7 +51,8 @@ async def get_movies(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search in title or overview"),
-    genre: Optional[str] = Query(None, description="Filter by genre name"),
+    genre: Optional[str] = Query(None, description="Filter by genre name (comma-separated for multiple)"),
+    exclude_genre: Optional[str] = Query(None, description="Exclude movies matching this genre name (comma-separated)"),
     min_popularity: Optional[float] = Query(None, ge=0, description="Minimum popularity score"),
     adult: Optional[bool] = Query(None, description="Filter by adult content"),
     db: AsyncSession = Depends(get_session),
@@ -70,9 +72,32 @@ async def get_movies(
         count_query = count_query.where(search_filter)
     
     if genre:
-        # Join with genres to filter by genre name
-        query = query.join(MovieGenre).join(Genre).where(Genre.name.ilike(f"%{genre}%"))
-        count_query = count_query.join(MovieGenre).join(Genre).where(Genre.name.ilike(f"%{genre}%"))
+        include_terms = [value.strip() for value in genre.split(",") if value.strip()]
+        if include_terms:
+            include_conditions = [Genre.name.ilike(f"%{value}%") for value in include_terms]
+            include_filter = or_(*include_conditions) if len(include_conditions) > 1 else include_conditions[0]
+            include_subquery = (
+                select(MovieGenre.movie_id)
+                .join(Genre)
+                .where(include_filter)
+                .distinct()
+            )
+            query = query.where(Movie.id.in_(include_subquery))
+            count_query = count_query.where(Movie.id.in_(include_subquery))
+
+    if exclude_genre:
+        exclude_terms = [value.strip() for value in exclude_genre.split(",") if value.strip()]
+        if exclude_terms:
+            exclude_conditions = [Genre.name.ilike(f"%{value}%") for value in exclude_terms]
+            exclude_filter = or_(*exclude_conditions) if len(exclude_conditions) > 1 else exclude_conditions[0]
+            exclude_subquery = (
+                select(MovieGenre.movie_id)
+                .join(Genre)
+                .where(exclude_filter)
+                .distinct()
+            )
+            query = query.where(~Movie.id.in_(exclude_subquery))
+            count_query = count_query.where(~Movie.id.in_(exclude_subquery))
     
     if min_popularity is not None:
         popularity_filter = Movie.popularity >= min_popularity
@@ -86,7 +111,7 @@ async def get_movies(
     
     # Get total count
     count_result = await db.execute(count_query)
-    total_items = count_result.scalar()
+    total_items = count_result.scalar() or 0
     
     # Apply pagination and ordering
     query = query.order_by(Movie.popularity.desc()).offset(offset).limit(per_page)

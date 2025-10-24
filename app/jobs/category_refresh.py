@@ -1,10 +1,12 @@
 import asyncio
 import logging
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.redis import redis_client
+from app.core.job_execution import job_execution_manager
+from app.core.settings import settings
 from app.services.tmdb_client.client import TMDBClient
 from app.crud import movie, media_category, job_status,  job_log
 from app.models.job_status import JobType
@@ -12,14 +14,12 @@ from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
 logger = logging.getLogger(__name__)
 
-MOVIES_PER_CATEGORY = 20  # Number of movies to fetch per category
-ERROR_RATE_THRESHOLD = 0.9
-
 
 class CategoryRefreshJob:
     def __init__(self):
         self.job_type = JobType.CATEGORY_REFRESH
         self.tmdb_client = None
+        self.config = settings.JOBS
         
         # Mapping of category names to TMDB client methods
         self.category_methods = {
@@ -38,6 +38,7 @@ class CategoryRefreshJob:
     
     async def run(self):
         job_id = None
+        cancel_event = None
         
         async for db_session in get_session():
             try:
@@ -59,19 +60,27 @@ class CategoryRefreshJob:
                     return
                 
                 # Create job status record
-                total_items = len(valid_categories) * MOVIES_PER_CATEGORY
+                total_items = (
+                    len(valid_categories)
+                    * self.config.movie_items_per_category
+                )
                 job_status_record = await job_status.create_job(
                     db_session, 
                     job_type=self.job_type,
                     total_items=total_items
                 )
                 job_id = job_status_record.id
+                cancel_event = await job_execution_manager.register(job_id, self.job_type)
                 
                 # Log job start
                 await job_log.log_info(
                     db_session,
                     job_id,
-                    f"Starting Category Refresh Job - updating {len(valid_categories)} categories with {MOVIES_PER_CATEGORY} movies each"
+                    (
+                        "Starting Category Refresh Job - updating "
+                        f"{len(valid_categories)} categories with "
+                        f"{self.config.movie_items_per_category} movies each"
+                    )
                 )
                 
                 # Mark job as running
@@ -84,7 +93,7 @@ class CategoryRefreshJob:
                 self.tmdb_client = TMDBClient()
                 
                 # Process each category
-                batch_result = await self._refresh_categories(db_session, job_id, valid_categories)
+                batch_result = await self._refresh_categories(db_session, job_id, valid_categories, cancel_event)
 
                 await job_log.log_info(
                     db_session,
@@ -107,7 +116,10 @@ class CategoryRefreshJob:
                     else 0
                 )
 
-                if batch_result.attempted > 0 and failure_rate >= ERROR_RATE_THRESHOLD:
+                if (
+                    batch_result.attempted > 0
+                    and failure_rate >= self.config.error_rate_threshold
+                ):
                     await job_log.log_error(
                         db_session,
                         job_id,
@@ -141,7 +153,16 @@ class CategoryRefreshJob:
                     )
 
                 break
-                
+            except asyncio.CancelledError:
+                logger.warning("Category Refresh Job cancellation requested")
+                if job_id:
+                    await job_log.log_warning(
+                        db_session,
+                        job_id,
+                        "Cancellation requested; aborting category refresh run"
+                    )
+                    await job_status.cancel_job(db_session, job_id)
+                return
             except Exception as e:
                 logger.error(f"Category Refresh Job failed: {str(e)}", exc_info=True)
                 
@@ -155,10 +176,18 @@ class CategoryRefreshJob:
                 
                 raise
             finally:
+                if job_id is not None:
+                    await job_execution_manager.unregister(job_id)
                 if self.tmdb_client:
                     await self.tmdb_client.close()
     
-    async def _refresh_categories(self, db: AsyncSession, job_id: int, categories: List) -> BatchProcessResult:
+    async def _refresh_categories(
+        self,
+        db: AsyncSession,
+        job_id: int,
+        categories: List,
+        cancel_event: Optional[asyncio.Event]
+    ) -> BatchProcessResult:
         """Refresh all media categories with latest movies."""
         total_attempted = 0
         total_succeeded = 0
@@ -167,6 +196,14 @@ class CategoryRefreshJob:
         
         try:
             for category in categories:
+                if cancel_event and cancel_event.is_set():
+                    await job_log.log_warning(
+                        db,
+                        job_id,
+                        "Cancellation requested; stopping remaining category updates"
+                    )
+                    break
+
                 await job_log.log_info(
                     db,
                     job_id,
@@ -174,7 +211,7 @@ class CategoryRefreshJob:
                 )
                 
                 # Process this category
-                category_result = await self._refresh_single_category(db, job_id, category)
+                category_result = await self._refresh_single_category(db, job_id, category, cancel_event)
                 total_attempted += category_result.attempted
                 total_succeeded += category_result.succeeded
                 total_failed += category_result.failed
@@ -186,9 +223,11 @@ class CategoryRefreshJob:
                     f"Updated category '{category.name}' with {category_result.succeeded} movies"
                 )
                 
-                # Small delay between categories
-                await asyncio.sleep(0.25)
-            
+                if cancel_event and cancel_event.is_set():
+                    break
+
+                await asyncio.sleep(0.1)
+
             return BatchProcessResult(
                 attempted=total_attempted,
                 succeeded=total_succeeded,
@@ -204,7 +243,13 @@ class CategoryRefreshJob:
             )
             raise
     
-    async def _refresh_single_category(self, db: AsyncSession, job_id: int, category) -> BatchProcessResult:
+    async def _refresh_single_category(
+        self,
+        db: AsyncSession,
+        job_id: int,
+        category,
+        cancel_event: Optional[asyncio.Event]
+    ) -> BatchProcessResult:
         """Refresh a single media category with latest movies."""
         try:
             category_result = BatchProcessResult()
@@ -240,7 +285,9 @@ class CategoryRefreshJob:
                 )
                 return category_result
             
-            movies = response.movies[:MOVIES_PER_CATEGORY]  # Limit to MOVIES_PER_CATEGORY
+            movies = response.movies[
+                : self.config.movie_items_per_category
+            ]
 
             # Extract movie IDs for processing
             movie_ids = [movie_data.tmdb_id for movie_data in movies if movie_data.tmdb_id]
@@ -252,7 +299,8 @@ class CategoryRefreshJob:
                     self.tmdb_client,
                     movie_ids,
                     job_id,
-                    use_locks=True
+                    use_locks=True,
+                    cancel_event=cancel_event
                 )
 
             if category_result.skipped_locked:

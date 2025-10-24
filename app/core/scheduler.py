@@ -7,6 +7,7 @@ from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.executors.asyncio import AsyncIOExecutor
 
 from app.jobs import movie_discovery_job, change_tracking_job, category_refresh_job
+from app.core.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -60,13 +61,18 @@ class JobScheduler:
         
         try:
             # Job 1: Movie Discovery Job - Every 5 minutes
+            next_run_time = datetime.utcnow()
+            delay_minutes = settings.MOVIE_DISCOVERY_START_DELAY_MINUTES
+            if delay_minutes > 0:
+                next_run_time = datetime.utcnow() + timedelta(minutes=delay_minutes)
+
             self.scheduler.add_job(
                 func=movie_discovery_job.run,
-                trigger=IntervalTrigger(minutes=5),
+                trigger=IntervalTrigger(minutes=2),
                 id='movie_discovery_job',
                 name='Movie Discovery Job',
                 replace_existing=True,
-                next_run_time=datetime.utcnow() + timedelta(hours=10)  # start after 10 hours from now
+                next_run_time=next_run_time
             )
             logger.info("Configured Movie Discovery Job - runs every 5 minutes")
             

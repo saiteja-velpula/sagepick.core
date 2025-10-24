@@ -21,7 +21,8 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         *, 
         movie_create: MovieCreate,
         genre_ids: Optional[List[int]] = None,
-        keyword_ids: Optional[List[int]] = None
+        keyword_ids: Optional[List[int]] = None,
+        commit: bool = True
     ) -> Movie:
         # Check if movie exists by tmdb_id
         existing_movie = await self.get_by_tmdb_id(db, movie_create.tmdb_id)
@@ -39,20 +40,31 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
             movie = Movie(**movie_data)
             db.add(movie)
         
-        await db.commit()
-        await db.refresh(movie)
+        await db.flush()
         
         # Handle genres
         if genre_ids is not None:
-            await self._upsert_movie_genres(db, movie.id, genre_ids)
+            await self._upsert_movie_genres(db, movie.id, genre_ids, commit=False)
         
         # Handle keywords
         if keyword_ids is not None:
-            await self._upsert_movie_keywords(db, movie.id, keyword_ids)
-        
+            await self._upsert_movie_keywords(db, movie.id, keyword_ids, commit=False)
+
+        if commit:
+            await db.commit()
+            await db.refresh(movie)
+        else:
+            await db.flush()
         return movie
     
-    async def _upsert_movie_genres(self, db: AsyncSession, movie_id: int, genre_ids: List[int]):
+    async def _upsert_movie_genres(
+        self,
+        db: AsyncSession,
+        movie_id: int,
+        genre_ids: List[int],
+        *,
+        commit: bool = True
+    ):
         # Remove existing genres
         statement = select(MovieGenre).where(MovieGenre.movie_id == movie_id)
         result = await db.execute(statement)
@@ -66,9 +78,19 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
             movie_genre = MovieGenre(movie_id=movie_id, genre_id=genre_id)
             db.add(movie_genre)
         
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
     
-    async def _upsert_movie_keywords(self, db: AsyncSession, movie_id: int, keyword_ids: List[int]):
+    async def _upsert_movie_keywords(
+        self,
+        db: AsyncSession,
+        movie_id: int,
+        keyword_ids: List[int],
+        *,
+        commit: bool = True
+    ):
         # Remove existing keywords
         statement = select(MovieKeyword).where(MovieKeyword.movie_id == movie_id)
         result = await db.execute(statement)
@@ -82,7 +104,10 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
             movie_keyword = MovieKeyword(movie_id=movie_id, keyword_id=keyword_id)
             db.add(movie_keyword)
         
-        await db.commit()
+        if commit:
+            await db.commit()
+        else:
+            await db.flush()
     
     async def get_movies_by_tmdb_ids(self, db: AsyncSession, tmdb_ids: List[int]) -> List[Movie]:
         statement = select(Movie).where(Movie.tmdb_id.in_(tmdb_ids))

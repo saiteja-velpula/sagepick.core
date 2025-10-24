@@ -13,7 +13,14 @@ class CRUDKeyword(CRUDBase[Keyword, Keyword, Keyword]):
         result = await db.execute(statement)
         return result.scalars().first()
     
-    async def upsert_keyword(self, db: AsyncSession, *, keyword_id: int, name: str) -> Keyword:
+    async def upsert_keyword(
+        self,
+        db: AsyncSession,
+        *,
+        keyword_id: int,
+        name: str,
+        commit: bool = True
+    ) -> Keyword:
         # Check if keyword exists by tmdb_id
         existing_keyword = await self.get_by_tmdb_id(db, keyword_id)
         
@@ -27,8 +34,11 @@ class CRUDKeyword(CRUDBase[Keyword, Keyword, Keyword]):
             keyword = Keyword(tmdb_id=keyword_id, name=name)
             db.add(keyword)
         
-        await db.commit()
-        await db.refresh(keyword)
+        if commit:
+            await db.commit()
+            await db.refresh(keyword)
+        else:
+            await db.flush()
         return keyword
 
 

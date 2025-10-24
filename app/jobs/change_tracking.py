@@ -1,8 +1,12 @@
+import asyncio
 import logging
+from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.redis import redis_client
+from app.core.job_execution import job_execution_manager
+from app.core.settings import settings
 from app.services.tmdb_client.client import TMDBClient
 from app.crud import job_status, job_log
 from app.models.job_status import JobType
@@ -10,18 +14,17 @@ from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
 logger = logging.getLogger(__name__)
 
-ITEMS_PER_PAGE = 100  # TMDB returns up to 100 items per page for changes
-ERROR_RATE_THRESHOLD = 0.9
-
 
 class ChangeTrackingJob:
     def __init__(self):
         self.job_type = JobType.CHANGE_TRACKING
         self.tmdb_client = None
+        self.config = settings.JOBS
     
     async def run(self):
         """Main job execution method."""
         job_id = None
+        cancel_event = None
         
         async for db_session in get_session():
             try:
@@ -32,6 +35,7 @@ class ChangeTrackingJob:
                     total_items=0
                 )
                 job_id = job_status_record.id
+                cancel_event = await job_execution_manager.register(job_id, self.job_type)
                 
                 # Log job start
                 await job_log.log_info(
@@ -50,7 +54,7 @@ class ChangeTrackingJob:
                 self.tmdb_client = TMDBClient()
                 
                 # Track changes and process movies
-                batch_result = await self._track_changes(db_session, job_id)
+                batch_result = await self._track_changes(db_session, job_id, cancel_event)
 
                 await job_log.log_info(
                     db_session,
@@ -73,7 +77,10 @@ class ChangeTrackingJob:
                     else 0
                 )
 
-                if batch_result.attempted > 0 and failure_rate >= ERROR_RATE_THRESHOLD:
+                if (
+                    batch_result.attempted > 0
+                    and failure_rate >= self.config.error_rate_threshold
+                ):
                     await job_log.log_error(
                         db_session,
                         job_id,
@@ -106,7 +113,16 @@ class ChangeTrackingJob:
                     )
 
                 break
-                
+            except asyncio.CancelledError:
+                logger.warning("Change Tracking Job cancellation requested")
+                if job_id:
+                    await job_log.log_warning(
+                        db_session,
+                        job_id,
+                        "Cancellation requested; aborting change tracking run"
+                    )
+                    await job_status.cancel_job(db_session, job_id)
+                return
             except Exception as e:
                 logger.error(f"Change Tracking Job failed: {str(e)}", exc_info=True)
                 
@@ -120,10 +136,17 @@ class ChangeTrackingJob:
                 
                 raise
             finally:
+                if job_id is not None:
+                    await job_execution_manager.unregister(job_id)
                 if self.tmdb_client:
                     await self.tmdb_client.close()
-    
-    async def _track_changes(self, db: AsyncSession, job_id: int) -> BatchProcessResult:
+
+    async def _track_changes(
+        self,
+        db: AsyncSession,
+        job_id: int,
+        cancel_event: Optional[asyncio.Event]
+    ) -> BatchProcessResult:
         """Track changes from TMDB changes endpoint."""
         try:
             total_attempted = 0
@@ -134,6 +157,14 @@ class ChangeTrackingJob:
             total_pages = 1
             
             while current_page <= total_pages:
+                if cancel_event and cancel_event.is_set():
+                    await job_log.log_warning(
+                        db,
+                        job_id,
+                        "Cancellation requested; stopping remaining change tracking pages"
+                    )
+                    break
+
                 await job_log.log_info(
                     db,
                     job_id,
@@ -162,7 +193,9 @@ class ChangeTrackingJob:
                 
                 # Update total items estimate if this is the first page
                 if current_page == 1:
-                    estimated_total = total_pages * ITEMS_PER_PAGE
+                    estimated_total = (
+                        total_pages * self.config.tracking_items_per_page
+                    )
                     await job_status.update_total_items(db, job_id, estimated_total)
                 
                 # Process each changed movie
@@ -175,7 +208,8 @@ class ChangeTrackingJob:
                         self.tmdb_client,
                         movie_ids,
                         job_id,
-                        use_locks=True
+                        use_locks=True,
+                        cancel_event=cancel_event
                     )
                     total_attempted += batch_result.attempted
                     total_succeeded += batch_result.succeeded

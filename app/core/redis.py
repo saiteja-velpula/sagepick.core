@@ -1,5 +1,5 @@
 import redis.asyncio as redis
-from typing import Optional
+from typing import Dict, Optional
 import logging
 
 from app.core.settings import settings
@@ -95,6 +95,25 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Redis health check failed: {e}")
             return False
+
+    async def hgetall(self, key: str) -> Dict[str, str]:
+        """Fetch a Redis hash and return it as a plain dict."""
+        if not self.redis:
+            return {}
+        try:
+            return await self.redis.hgetall(key)
+        except Exception as exc: 
+            logger.error("Failed to read Redis hash %s: %s", key, exc)
+            return {}
+
+    async def hset(self, key: str, field: int | str, value: int | str) -> None:
+        """Set a field on a Redis hash, swallowing connection failures."""
+        if not self.redis:
+            return
+        try:
+            await self.redis.hset(key, field, value)
+        except Exception as exc: 
+            logger.error("Failed to persist Redis hash %s field %s: %s", key, field, exc)
 
 
 # Global Redis client instance

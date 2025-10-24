@@ -62,10 +62,11 @@ class ApiClient:
         url = f"{self.base_url}{endpoint}"
         request_headers = {**self.default_headers, **(headers or {})}
         
-        attempt = 0
+        max_attempts = max(1, self.retry_config.attempts)
+        attempt = 1
         last_exception = None
         
-        while attempt <= self.retry_config.attempts:
+        while attempt <= max_attempts:
             try:
                 response = await self._client.request(
                     method=method,
@@ -77,12 +78,18 @@ class ApiClient:
                 
                 # Check if response is successful
                 if response.is_success:
-                    return response.json()
+                    if not response.content:
+                        return {}
+                    try:
+                        return response.json()
+                    except ValueError as exc: 
+                        logger.error("Failed to decode JSON response from %s: %s", url, exc)
+                        raise
                 
                 # Check if we should retry based on status code
-                if (attempt < self.retry_config.attempts and 
+                if (attempt < max_attempts and 
                     response.status_code in self.retry_config.retry_on_status):
-                    await self._delay(attempt)
+                    await self._delay(attempt - 1)
                     attempt += 1
                     continue
                 
@@ -91,10 +98,10 @@ class ApiClient:
                 
             except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
                 last_exception = e
-                logger.warning(f"Network error on attempt {attempt + 1}: {e}")
+                logger.warning("Network error on attempt %s: %s", attempt, e)
                 
-                if attempt < self.retry_config.attempts:
-                    await self._delay(attempt)
+                if attempt < max_attempts:
+                    await self._delay(attempt - 1)
                     attempt += 1
                     continue
                 else:

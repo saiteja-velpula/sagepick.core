@@ -6,6 +6,7 @@ from sqlmodel import select, delete
 from app.core.db import get_session
 from app.core.scheduler import job_scheduler
 from app.core.redis import redis_client
+from app.core.job_execution import job_execution_manager
 from app.crud.job_status import job_status
 from app.crud.job_log import job_log
 from app.models.job_status import JobType, JobExecutionStatus, JobStatusRead
@@ -192,6 +193,42 @@ async def delete_job_status(
     await job_status.remove(db, id=job_id)
     
     return {"message": f"Job status {job_id} and its logs have been deleted"}
+
+
+@router.post("/status/{job_id}/cancel")
+async def cancel_running_job(
+    job_id: int,
+    db: AsyncSession = Depends(get_session),
+    token: dict = Depends(verify_token)
+):
+    """Cancel an actively running job execution."""
+    job_status_obj = await job_status.get(db, job_id)
+    if not job_status_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job status not found"
+        )
+
+    if job_status_obj.status != JobExecutionStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job is not currently running"
+        )
+
+    cancellation_initiated = await job_execution_manager.cancel(job_id)
+    if not cancellation_initiated:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Job is finishing up and can no longer be cancelled"
+        )
+
+    await job_log.log_warning(
+        db,
+        job_id,
+        "Cancellation requested for running job"
+    )
+
+    return {"message": f"Cancellation requested for job {job_id}"}
 
 
 # Job Logs Endpoints

@@ -34,6 +34,7 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
         if job_status:
             job_status.status = JobExecutionStatus.RUNNING
             job_status.started_at = datetime.utcnow()
+            job_status.updated_at = datetime.utcnow()
             db.add(job_status)
             await db.commit()
             await db.refresh(job_status)
@@ -54,6 +55,7 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
                 job_status.processed_items = items_processed
             if failed_items is not None:
                 job_status.failed_items = failed_items
+            job_status.updated_at = datetime.utcnow()
             db.add(job_status)
             await db.commit()
             await db.refresh(job_status)
@@ -74,6 +76,28 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
                 job_status.processed_items = processed_items
             if failed_items is not None:
                 job_status.failed_items = failed_items
+            job_status.updated_at = datetime.utcnow()
+            db.add(job_status)
+            await db.commit()
+            await db.refresh(job_status)
+        return job_status
+
+    async def cancel_job(
+        self,
+        db: AsyncSession,
+        job_id: int,
+        processed_items: Optional[int] = None,
+        failed_items: Optional[int] = None
+    ) -> Optional[JobStatus]:
+        job_status = await self.get(db, job_id)
+        if job_status:
+            job_status.status = JobExecutionStatus.CANCELLED
+            job_status.completed_at = datetime.utcnow()
+            if processed_items is not None:
+                job_status.processed_items = processed_items
+            if failed_items is not None:
+                job_status.failed_items = failed_items
+            job_status.updated_at = datetime.utcnow()
             db.add(job_status)
             await db.commit()
             await db.refresh(job_status)
@@ -84,7 +108,9 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
         db: AsyncSession,
         job_id: int,
         processed_delta: int = 0,
-        failed_delta: int = 0
+        failed_delta: int = 0,
+        *,
+        commit: bool = False
     ) -> Optional[JobStatus]:
         """Increment processed/failed counters for a job and persist immediately."""
         if not processed_delta and not failed_delta:
@@ -98,8 +124,11 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
                 job_status.failed_items += failed_delta
             job_status.updated_at = datetime.utcnow()
             db.add(job_status)
-            await db.commit()
-            await db.refresh(job_status)
+            if commit:
+                await db.commit()
+                await db.refresh(job_status)
+            else:
+                await db.flush()
         return job_status
     
     async def update_total_items(
