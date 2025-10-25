@@ -9,6 +9,12 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      SECRET_ISS: ${{ secrets.SECRET_ISS }}
+      TMDB_BEARER_TOKEN: ${{ secrets.TMDB_BEARER_TOKEN }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
 
     steps:
       - name: Check out repository
