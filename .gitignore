@@ -10,4 +10,4 @@ wheels/
 .venv
 
 .env
-.env.*
+.env.production
