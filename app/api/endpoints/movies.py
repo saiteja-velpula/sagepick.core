@@ -346,7 +346,7 @@ async def get_movie_statistics(db: AsyncSession = Depends(get_session), token: d
     total_categories = total_categories_result.scalar()
     
     # Movies by adult content
-    adult_movies_query = select(func.count(Movie.id)).where(Movie.adult == True)
+    adult_movies_query = select(func.count(Movie.id)).where(Movie.adult)
     adult_movies_result = await db.execute(adult_movies_query)
     adult_movies = adult_movies_result.scalar()
     

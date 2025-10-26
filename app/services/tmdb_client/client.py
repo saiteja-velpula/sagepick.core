@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import Dict, Any
 from app.core.settings import settings
 from app.core import ApiClient, RetryConfig
 from .models import (
