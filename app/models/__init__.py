@@ -6,12 +6,12 @@ from .movie_keyword import MovieKeyword
 from .media_category import MediaCategory, MediaCategoryRead, MediaCategoryUpdate
 from .media_category_movie import MediaCategoryMovie
 from .job_status import (
-    JobStatus, 
-    JobStatusCreate, 
-    JobStatusUpdate, 
+    JobStatus,
+    JobStatusCreate,
+    JobStatusUpdate,
     JobStatusRead,
     JobType,
-    JobExecutionStatus
+    JobExecutionStatus,
 )
 from .job_log import JobLog, JobLogCreate, JobLogRead, LogLevel
 from .movie_discovery_state import MovieDiscoveryState
@@ -28,12 +28,12 @@ __all__ = [
     "MovieGenre",
     "MovieKeyword",
     "MediaCategory",
-    "MediaCategoryRead", 
+    "MediaCategoryRead",
     "MediaCategoryUpdate",
     "MediaCategoryMovie",
     "JobStatus",
     "JobStatusCreate",
-    "JobStatusUpdate", 
+    "JobStatusUpdate",
     "JobStatusRead",
     "JobType",
     "JobExecutionStatus",

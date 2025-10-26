@@ -8,7 +8,7 @@ from .movie_discovery_state import movie_discovery_state
 
 __all__ = [
     "movie",
-    "genre", 
+    "genre",
     "keyword",
     "media_category",
     "job_status",

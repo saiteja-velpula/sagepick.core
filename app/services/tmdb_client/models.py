@@ -54,14 +54,14 @@ class MovieItem(BaseModel):
     adult: bool
     genre_ids: List[int] = Field(default_factory=list)
 
-    @field_validator('release_date', mode='before')
+    @field_validator("release_date", mode="before")
     def parse_release_date(cls, v):
         """Handle empty string or null release dates."""
         if not v or v == "":
             return None
         return v
 
-    @field_validator('overview', mode='before')
+    @field_validator("overview", mode="before")
     def parse_overview(cls, v):
         if v == "":
             return None
@@ -84,7 +84,7 @@ class MovieDetails(BaseModel):
     vote_count: int
     popularity: float
     adult: bool
-    
+
     # Additional fields only in detailed response
     runtime: Optional[int] = None  # Minutes, can be null/0
     revenue: Optional[int] = None  # Box office, can be 0/null
@@ -93,20 +93,20 @@ class MovieDetails(BaseModel):
     tagline: Optional[str] = None
     homepage: Optional[str] = None
     imdb_id: Optional[str] = None
-    
+
     # Related objects (full data instead of just IDs)
     genres: List[Genre] = Field(default_factory=list)
     production_companies: List[ProductionCompany] = Field(default_factory=list)
     production_countries: List[ProductionCountry] = Field(default_factory=list)
     spoken_languages: List[SpokenLanguage] = Field(default_factory=list)
 
-    @field_validator('release_date', mode='before')
+    @field_validator("release_date", mode="before")
     def parse_release_date(cls, v):
         if not v or v == "":
             return None
         return v
 
-    @field_validator('overview', mode='before')
+    @field_validator("overview", mode="before")
     def parse_overview(cls, v):
         if v == "":
             return None
@@ -115,11 +115,12 @@ class MovieDetails(BaseModel):
     class Config:
         populate_by_name = True
 
+
 class MovieChangeItem(BaseModel):
     id: int
     adult: Optional[bool] = False
 
-    @field_validator('adult', mode='before')
+    @field_validator("adult", mode="before")
     def parse_adult(cls, v):
         if v is None:
             return False
@@ -153,7 +154,8 @@ class PaginationInfo(BaseModel):
 class MovieListResponse(BaseModel):
     movies: List[MovieItem]
     pagination: PaginationInfo
-    
+
+
 class MovieChangeResponse(BaseModel):
     results: List[MovieChangeItem]
     page: int
@@ -166,35 +168,35 @@ class MovieSearchParams(BaseModel):
     # Basic search
     query: Optional[str] = None
     page: int = 1
-    
+
     # Date filters
     primary_release_year: Optional[int] = None
     year: Optional[int] = None
-    
+
     # Rating filters
     vote_average_gte: Optional[float] = None
     vote_count_gte: Optional[int] = None
-    
+
     # Genre filters (comma-separated IDs)
     with_genres: Optional[str] = None
     without_genres: Optional[str] = None
-    
+
     # Runtime filters
     with_runtime_gte: Optional[int] = None
     with_runtime_lte: Optional[int] = None
-    
+
     # Origin filters
     with_origin_country: Optional[str] = None
     with_original_language: Optional[str] = None
-    
+
     # Company/keyword filters
     with_companies: Optional[str] = None
     with_keywords: Optional[str] = None
     without_keywords: Optional[str] = None
-    
+
     # Sorting
     sort_by: str = "popularity.desc"
-    
+
     # Content filters
     include_adult: bool = False
     include_video: bool = False

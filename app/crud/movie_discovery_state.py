@@ -20,14 +20,18 @@ class MovieDiscoveryStateCRUD:
             return state.current_page
         return 1
 
-    async def update_current_page(self, db: AsyncSession, current_page: int) -> MovieDiscoveryState:
+    async def update_current_page(
+        self, db: AsyncSession, current_page: int
+    ) -> MovieDiscoveryState:
         current_page = max(1, current_page)
         state = await self.get_state(db)
         if state:
             state.current_page = current_page
             state.updated_at = datetime.utcnow()
         else:
-            state = MovieDiscoveryState(id=1, current_page=current_page, updated_at=datetime.utcnow())
+            state = MovieDiscoveryState(
+                id=1, current_page=current_page, updated_at=datetime.utcnow()
+            )
         db.add(state)
         await db.commit()
         await db.refresh(state)

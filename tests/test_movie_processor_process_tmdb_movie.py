@@ -27,7 +27,9 @@ async def test_process_tmdb_movie_success(monkeypatch):
         genres=[types.SimpleNamespace(id=101, name="Action")],
     )
 
-    keywords_response = types.SimpleNamespace(keywords=[types.SimpleNamespace(id=201, name="Hero")])
+    keywords_response = types.SimpleNamespace(
+        keywords=[types.SimpleNamespace(id=201, name="Hero")]
+    )
 
     async def fake_movie_by_id(movie_id):
         return movie_details
@@ -52,8 +54,12 @@ async def test_process_tmdb_movie_success(monkeypatch):
 
     caches = movie_processor._LookupCaches(genres={}, keywords={})
 
-    monkeypatch.setattr(movie_processor, "_rate_limiter", movie_processor._AsyncRateLimiter(100))
-    monkeypatch.setattr(movie_processor._genre_cache, "set", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        movie_processor, "_rate_limiter", movie_processor._AsyncRateLimiter(100)
+    )
+    monkeypatch.setattr(
+        movie_processor._genre_cache, "set", lambda *args, **kwargs: None
+    )
 
     async def _noop_keyword_set(*args, **kwargs):
         return None
@@ -67,7 +73,9 @@ async def test_process_tmdb_movie_success(monkeypatch):
 
     monkeypatch.setattr(movie_processor.genre, "upsert_genre", fake_upsert_genre)
     monkeypatch.setattr(movie_processor.keyword, "upsert_keyword", fake_upsert_keyword)
-    monkeypatch.setattr(movie_processor.movie, "upsert_movie_with_relationships", fake_upsert_movie)
+    monkeypatch.setattr(
+        movie_processor.movie, "upsert_movie_with_relationships", fake_upsert_movie
+    )
 
     result = await movie_processor.process_tmdb_movie(
         DummySession(),

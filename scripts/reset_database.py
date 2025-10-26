@@ -8,9 +8,11 @@ from sqlmodel import SQLModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.core.db import engine, close_db
-import app.models # noqa: F401
+import app.models  # noqa: F401
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger("reset_database")
 
 
@@ -27,7 +29,9 @@ async def drop_database() -> None:
 async def main() -> None:
     try:
         await drop_database()
-        logger.info("Database metadata dropped successfully. Alembic version table removed.")
+        logger.info(
+            "Database metadata dropped successfully. Alembic version table removed."
+        )
     finally:
         await close_db()
 

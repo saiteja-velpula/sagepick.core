@@ -6,6 +6,7 @@ from app.core import settings
 
 security = HTTPBearer()
 
+
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     token = credentials.credentials
     try:

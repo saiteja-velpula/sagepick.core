@@ -30,7 +30,9 @@ class JobExecutionManager:
 
         cancel_event = asyncio.Event()
         async with self._lock:
-            self._jobs[job_status_id] = RunningJob(job_type=job_type, task=task, cancel_event=cancel_event)
+            self._jobs[job_status_id] = RunningJob(
+                job_type=job_type, task=task, cancel_event=cancel_event
+            )
         logger.debug("Registered running job %s (%s)", job_status_id, job_type.value)
         return cancel_event
 
@@ -54,7 +56,11 @@ class JobExecutionManager:
                 return False
             record.cancel_event.set()
             record.task.cancel()
-            logger.info("Cancellation requested for job %s (%s)", job_status_id, record.job_type.value)
+            logger.info(
+                "Cancellation requested for job %s (%s)",
+                job_status_id,
+                record.job_type.value,
+            )
             return True
 
     async def get_running_job(self, job_status_id: int) -> Optional[RunningJob]:

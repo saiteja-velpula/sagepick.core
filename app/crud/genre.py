@@ -7,23 +7,17 @@ from app.models.genre import Genre
 
 
 class CRUDGenre(CRUDBase[Genre, Genre, Genre]):
-    
     async def get_by_tmdb_id(self, db: AsyncSession, tmdb_id: int) -> Optional[Genre]:
         statement = select(Genre).where(Genre.tmdb_id == tmdb_id)
         result = await db.execute(statement)
         return result.scalars().first()
-    
+
     async def upsert_genre(
-        self,
-        db: AsyncSession,
-        *,
-        genre_id: int,
-        name: str,
-        commit: bool = True
+        self, db: AsyncSession, *, genre_id: int, name: str, commit: bool = True
     ) -> Genre:
         # Check if genre exists by tmdb_id
         existing_genre = await self.get_by_tmdb_id(db, genre_id)
-        
+
         if existing_genre:
             # Update existing genre
             existing_genre.name = name
@@ -33,7 +27,7 @@ class CRUDGenre(CRUDBase[Genre, Genre, Genre]):
             # Create new genre
             genre = Genre(tmdb_id=genre_id, name=name)
             db.add(genre)
-        
+
         if commit:
             await db.commit()
             await db.refresh(genre)
