@@ -143,6 +143,7 @@ class MovieDiscoveryJob:
                     )
                 return
             except Exception as e:
+                await db_session.rollback()
                 logger.error(f"Movie Discovery Job failed: {str(e)}", exc_info=True)
 
                 if job_id:
@@ -234,6 +235,7 @@ class MovieDiscoveryJob:
 
         except Exception as e:
             await job_log.log_error(db, job_id, f"Error in _discover_movies: {str(e)}")
+            await db.rollback()
             raise
 
 

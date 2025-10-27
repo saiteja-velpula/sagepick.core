@@ -72,8 +72,12 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         for relation in existing_relations:
             await db.delete(relation)
 
-        # Add new genres
+        # Add new genres (preserve order while skipping duplicates)
+        seen: set[int] = set()
         for genre_id in genre_ids:
+            if genre_id in seen:
+                continue
+            seen.add(genre_id)
             movie_genre = MovieGenre(movie_id=movie_id, genre_id=genre_id)
             db.add(movie_genre)
 
@@ -98,8 +102,12 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         for relation in existing_relations:
             await db.delete(relation)
 
-        # Add new keywords
+        # Add new keywords (preserve order while skipping duplicates)
+        seen: set[int] = set()
         for keyword_id in keyword_ids:
+            if keyword_id in seen:
+                continue
+            seen.add(keyword_id)
             movie_keyword = MovieKeyword(movie_id=movie_id, keyword_id=keyword_id)
             db.add(movie_keyword)
 

@@ -31,8 +31,16 @@ class CRUDMediaCategory(CRUDBase[MediaCategory, MediaCategory, MediaCategoryUpda
         for relation in existing_relations:
             await db.delete(relation)
 
-        # Add new movie associations
+        # Add new movie associations (preserving order, skipping duplicates and nulls)
+        seen: set[int] = set()
+        unique_movie_ids: List[int] = []
         for movie_id in movie_ids:
+            if movie_id is None or movie_id in seen:
+                continue
+            seen.add(movie_id)
+            unique_movie_ids.append(movie_id)
+
+        for movie_id in unique_movie_ids:
             category_movie = MediaCategoryMovie(
                 media_category_id=category_id, movie_id=movie_id
             )
