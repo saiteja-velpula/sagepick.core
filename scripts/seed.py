@@ -21,7 +21,7 @@ logging.basicConfig(
 logger = logging.getLogger("database_seeder")
 
 # Seeding configuration
-PAGES_PER_CATEGORY = 2
+PAGES_PER_CATEGORY = 50
 API_DELAY = 0.25
 
 
