@@ -126,6 +126,7 @@ class ChangeTrackingJob:
                     await job_status.cancel_job(db_session, job_id)
                 return
             except Exception as e:
+                await db_session.rollback()
                 logger.error(f"Change Tracking Job failed: {str(e)}", exc_info=True)
 
                 if job_id:
@@ -239,6 +240,7 @@ class ChangeTrackingJob:
 
         except Exception as e:
             await job_log.log_error(db, job_id, f"Error in _track_changes: {str(e)}")
+            await db.rollback()
             raise
 
 

@@ -12,6 +12,7 @@ from app.core.redis import redis_client
 from app.core.settings import settings
 from app.models.movie import Movie, MovieCreate
 from app.models.genre import Genre
+from app.models.keyword import Keyword
 
 logger = logging.getLogger(__name__)
 
@@ -163,32 +164,87 @@ async def process_tmdb_movie(
             return None
 
         # Process genres
-        genre_ids = []
+        genre_ids: List[int] = []
+        pending_genres: List[tuple[int, int, Genre]] = []
+        seen_genres: set[int] = set()
         if movie_details.genres:
             for genre_data in movie_details.genres:
+                if genre_data.id in seen_genres:
+                    continue
+                seen_genres.add(genre_data.id)
+
                 cached_id = caches.genres.get(genre_data.id)
-                if cached_id is None:
-                    genre_obj = await genre.upsert_genre(
-                        db, genre_id=genre_data.id, name=genre_data.name, commit=False
-                    )
-                    cached_id = genre_obj.id
-                    caches.genres[genre_data.id] = cached_id
-                    _genre_cache.set(genre_data.id, cached_id)
-                genre_ids.append(cached_id)
+                if cached_id is not None:
+                    genre_ids.append(cached_id)
+                    continue
+
+                genre_obj = await genre.upsert_genre(
+                    db,
+                    genre_id=genre_data.id,
+                    name=genre_data.name,
+                    commit=False,
+                    flush=False,
+                )
+
+                if genre_obj.id is not None:
+                    # Existing genre retrieved; safe to use immediately.
+                    caches.genres[genre_data.id] = genre_obj.id
+                    _genre_cache.set(genre_data.id, genre_obj.id)
+                    genre_ids.append(genre_obj.id)
+                    continue
+
+                genre_ids.append(0)  # Placeholder updated after flush.
+                pending_genres.append((len(genre_ids) - 1, genre_data.id, genre_obj))
+
+        if pending_genres:
+            await db.flush()
+            for index, tmdb_id, genre_obj in pending_genres:
+                genre_ids[index] = genre_obj.id
+                caches.genres[tmdb_id] = genre_obj.id
+                _genre_cache.set(tmdb_id, genre_obj.id)
 
         # Process keywords
-        keyword_db_ids = []
+        keyword_db_ids: List[int] = []
+        pending_keywords: List[tuple[int, int]] = []  # (index, keyword_id)
+        keyword_objects: List[Keyword] = []
+        seen_keywords: set[int] = set()
         if keywords and keywords.keywords:
             for kw in keywords.keywords:
+                if kw.id in seen_keywords:
+                    continue
+                seen_keywords.add(kw.id)
+
                 cached_id = caches.keywords.get(kw.id)
-                if cached_id is None:
-                    keyword_obj = await keyword.upsert_keyword(
-                        db, keyword_id=kw.id, name=kw.name, commit=False
-                    )
-                    cached_id = keyword_obj.id
-                    caches.keywords[kw.id] = cached_id
-                    await _keyword_cache.set(kw.id, cached_id)
-                keyword_db_ids.append(cached_id)
+                if cached_id is not None:
+                    keyword_db_ids.append(cached_id)
+                    continue
+
+                keyword_obj = await keyword.upsert_keyword(
+                    db,
+                    keyword_id=kw.id,
+                    name=kw.name,
+                    commit=False,
+                    flush=False,
+                )
+
+                if keyword_obj.id is not None:
+                    caches.keywords[kw.id] = keyword_obj.id
+                    await _keyword_cache.set(kw.id, keyword_obj.id)
+                    keyword_db_ids.append(keyword_obj.id)
+                    continue
+
+                keyword_db_ids.append(0)  # Placeholder until flush assigns id.
+                pending_keywords.append((len(keyword_db_ids) - 1, kw.id))
+                keyword_objects.append(keyword_obj)
+
+        if pending_keywords:
+            await db.flush()
+            for (index, keyword_id), keyword_obj in zip(
+                pending_keywords, keyword_objects
+            ):
+                keyword_db_ids[index] = keyword_obj.id
+                caches.keywords[keyword_id] = keyword_obj.id
+                await _keyword_cache.set(keyword_id, keyword_obj.id)
 
         # Create movie object with full details
         movie_create = MovieCreate(
@@ -249,7 +305,10 @@ async def process_movie_batch(
     processed_delta = 0
     failed_delta = 0
 
-    for movie_id in movie_ids:
+    # Deduplicate while preserving order so we do not reprocess the same movie twice per batch
+    unique_movie_ids = list(dict.fromkeys(movie_ids))
+
+    for movie_id in unique_movie_ids:
         if cancel_event and cancel_event.is_set():
             if job_id and not cancellation_noted:
                 await job_log.log_warning(

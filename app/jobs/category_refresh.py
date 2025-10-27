@@ -166,6 +166,7 @@ class CategoryRefreshJob:
                     await job_status.cancel_job(db_session, job_id)
                 return
             except Exception as e:
+                await db_session.rollback()
                 logger.error(f"Category Refresh Job failed: {str(e)}", exc_info=True)
 
                 if job_id:
@@ -239,6 +240,7 @@ class CategoryRefreshJob:
             await job_log.log_error(
                 db, job_id, f"Error in _refresh_categories: {str(e)}"
             )
+            await db.rollback()
             raise
 
     async def _refresh_single_category(
@@ -307,7 +309,7 @@ class CategoryRefreshJob:
             # Update category with new movie IDs
             # First, get the actual movie IDs from our database (not TMDB IDs)
             db_movie_ids = []
-            for tmdb_id in movie_ids:
+            for tmdb_id in dict.fromkeys(movie_ids):
                 existing_movie = await movie.get_by_tmdb_id(db, tmdb_id)
                 if existing_movie:
                     db_movie_ids.append(existing_movie.id)
@@ -328,6 +330,7 @@ class CategoryRefreshJob:
             await job_log.log_error(
                 db, job_id, f"Error refreshing category {category.name}: {str(e)}"
             )
+            await db.rollback()
             # Don't re-raise here, continue with other categories
             logger.error(
                 f"Error refreshing category {category.name}: {str(e)}", exc_info=True
