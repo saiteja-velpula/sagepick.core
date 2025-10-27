@@ -37,11 +37,11 @@ async def test_process_tmdb_movie_success(monkeypatch):
     async def fake_movie_keywords(movie_id):
         return keywords_response
 
-    async def fake_upsert_genre(db, genre_id, name, commit):
+    async def fake_upsert_genre(db, genre_id, name, commit, flush):
         obj = types.SimpleNamespace(id=1)
         return obj
 
-    async def fake_upsert_keyword(db, keyword_id, name, commit):
+    async def fake_upsert_keyword(db, keyword_id, name, commit, flush):
         obj = types.SimpleNamespace(id=2)
         return obj
 
