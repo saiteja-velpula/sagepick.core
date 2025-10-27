@@ -2,14 +2,16 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
+from typing import Dict, List, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.db import get_session
 from app.core.redis import redis_client
 from app.services.tmdb_client.client import TMDBClient
-from app.crud import media_category, job_status, job_log
+from app.crud import job_log, job_status, media_category
 from app.models.job_status import JobType
 from app.models.media_category import MediaCategoryBase
 from app.utils.movie_processor import BatchProcessResult, process_movie_batch
@@ -25,71 +27,189 @@ PAGES_PER_CATEGORY = 50
 API_DELAY = 0.25
 
 
-class DatabaseSeeder:
-    def __init__(self):
-        self.tmdb_client = None
+CATEGORY_CATALOG: Dict[str, Dict[str, str]] = {
+    "trending": {
+        "name": "Trending",
+        "description": "Movies that are currently trending",
+        "method": "get_trending_movies",
+    },
+    "popular": {
+        "name": "Popular",
+        "description": "Most popular movies",
+        "method": "get_popular_movies",
+    },
+    "top_rated": {
+        "name": "Top Rated",
+        "description": "Highest rated movies",
+        "method": "get_top_rated_movies",
+    },
+    "upcoming": {
+        "name": "Upcoming",
+        "description": "Movies coming soon to theaters",
+        "method": "get_upcoming_movies",
+    },
+    "now_playing": {
+        "name": "Now Playing",
+        "description": "Movies currently in theaters",
+        "method": "get_now_playing_movies",
+    },
+    "bollywood": {
+        "name": "Bollywood",
+        "description": "Hindi movies from India",
+        "method": "get_bollywood_movies",
+    },
+    "tollywood": {
+        "name": "Tollywood",
+        "description": "Telugu movies from India",
+        "method": "get_tollywood_movies",
+    },
+    "kollywood": {
+        "name": "Kollywood",
+        "description": "Tamil movies from India",
+        "method": "get_kollywood_movies",
+    },
+    "mollywood": {
+        "name": "Mollywood",
+        "description": "Malayalam movies from India",
+        "method": "get_mollywood_movies",
+    },
+    "sandalwood": {
+        "name": "Sandalwood",
+        "description": "Kannada movies from India",
+        "method": "get_sandalwood_movies",
+    },
+    "hollywood": {
+        "name": "Hollywood",
+        "description": "English movies from Hollywood",
+        "method": "get_hollywood_movies",
+    },
+}
 
-        # Category definitions with TMDB client method mappings
-        self.categories = {
-            "trending": {
-                "name": "Trending",
-                "description": "Movies that are currently trending",
-                "method": "get_trending_movies",
-            },
-            "popular": {
-                "name": "Popular",
-                "description": "Most popular movies",
-                "method": "get_popular_movies",
-            },
-            "top_rated": {
-                "name": "Top Rated",
-                "description": "Highest rated movies",
-                "method": "get_top_rated_movies",
-            },
-            "upcoming": {
-                "name": "Upcoming",
-                "description": "Movies coming soon to theaters",
-                "method": "get_upcoming_movies",
-            },
-            "now_playing": {
-                "name": "Now Playing",
-                "description": "Movies currently in theaters",
-                "method": "get_now_playing_movies",
-            },
-            "bollywood": {
-                "name": "Bollywood",
-                "description": "Hindi movies from India",
-                "method": "get_bollywood_movies",
-            },
-            "tollywood": {
-                "name": "Tollywood",
-                "description": "Telugu movies from India",
-                "method": "get_tollywood_movies",
-            },
-            "kollywood": {
-                "name": "Kollywood",
-                "description": "Tamil movies from India",
-                "method": "get_kollywood_movies",
-            },
-            "mollywood": {
-                "name": "Mollywood",
-                "description": "Malayalam movies from India",
-                "method": "get_mollywood_movies",
-            },
-            "sandalwood": {
-                "name": "Sandalwood",
-                "description": "Kannada movies from India",
-                "method": "get_sandalwood_movies",
-            },
-            "hollywood": {
-                "name": "Hollywood",
-                "description": "English movies from Hollywood",
-                "method": "get_hollywood_movies",
-            },
+
+def _enumerate_categories(
+    categories: Dict[str, Dict[str, str]]
+) -> List[Tuple[int, str, Dict[str, str]]]:
+    return [(index, key, meta) for index, (key, meta) in enumerate(categories.items(), 1)]
+
+
+def _parse_category_tokens(
+    tokens: Sequence[str],
+    categories: Dict[str, Dict[str, str]],
+) -> Tuple[List[str], List[str]]:
+    ordered = list(categories.keys())
+    seen = set()
+    selected: List[str] = []
+    invalid: List[str] = []
+
+    def resolve_token(token: str) -> str | None:
+        token = token.strip()
+        if not token:
+            return None
+        if token.isdigit():
+            idx = int(token)
+            if 1 <= idx <= len(ordered):
+                return ordered[idx - 1]
+            return None
+        normal = token.lower()
+        for key in ordered:
+            meta = categories[key]
+            if normal in {key.lower(), meta["name"].lower()}:
+                return key
+        return None
+
+    normalized: List[str] = []
+    for token in tokens:
+        normalized.extend(part for part in token.replace(",", " ").split() if part)
+
+    for token in normalized:
+        match = resolve_token(token)
+        if match:
+            if match not in seen:
+                seen.add(match)
+                selected.append(match)
+        else:
+            invalid.append(token)
+
+    return selected, invalid
+
+
+def _prompt_for_category_selection(
+    categories: Dict[str, Dict[str, str]]
+) -> List[str]:
+    menu = _enumerate_categories(categories)
+    print("Available categories to seed:")
+    for index, _, meta in menu:
+        print(f"  {index:>2}. {meta['name']}: {meta['description']}")
+
+    while True:
+        raw = input(
+            "Enter category numbers or names (e.g. '1 8 10') or press Enter for all: "
+        ).strip()
+        if not raw:
+            return [key for _, key, _ in menu]
+        selected, invalid = _parse_category_tokens([raw], categories)
+        if invalid:
+            print(f"Unrecognized selections: {', '.join(invalid)}")
+            continue
+        if not selected:
+            print("No valid categories selected, try again.")
+            continue
+        return selected
+
+
+class DatabaseSeeder:
+    def __init__(self, selected_keys: Sequence[str] | None = None):
+        self.tmdb_client = None
+        self.categories = CATEGORY_CATALOG
+        self.selected_keys = self._resolve_selected_keys(selected_keys)
+        self.active_categories: Dict[str, Dict[str, str]] = {
+            key: self.categories[key] for key in self.selected_keys
         }
+
+    def _resolve_selected_keys(
+        self, selected_keys: Sequence[str] | None
+    ) -> List[str]:
+        if not selected_keys:
+            return list(self.categories.keys())
+
+        resolved: List[str] = []
+        seen = set()
+        for token in selected_keys:
+            key = token.strip().lower()
+            if not key:
+                continue
+            if key.isdigit():
+                idx = int(key)
+                ordered = list(self.categories.keys())
+                if 1 <= idx <= len(ordered):
+                    candidate = ordered[idx - 1]
+                else:
+                    continue
+            else:
+                matches = {
+                    cat_key
+                    for cat_key, meta in self.categories.items()
+                    if key in {cat_key.lower(), meta["name"].lower()}
+                }
+                if not matches:
+                    continue
+                candidate = next(iter(matches))
+
+            if candidate not in seen:
+                seen.add(candidate)
+                resolved.append(candidate)
+
+        if not resolved:
+            raise ValueError("No valid categories were selected.")
+        return resolved
 
     async def run(self):
         logger.info("Starting database seeding process...")
+
+        selected_names = ", ".join(
+            self.categories[key]["name"] for key in self.selected_keys
+        )
+        logger.info("Selected categories: %s", selected_names)
 
         # Initialize services
         await redis_client.initialize()
@@ -100,7 +220,9 @@ class DatabaseSeeder:
             overall_result = BatchProcessResult()
             try:
                 # Create job status for tracking
-                total_estimated_movies = len(self.categories) * PAGES_PER_CATEGORY * 20
+                total_estimated_movies = (
+                    len(self.active_categories) * PAGES_PER_CATEGORY * 20
+                )
                 job_status_record = await job_status.create_job(
                     db_session,
                     job_type=JobType.MOVIE_DISCOVERY,  # Use movie discovery type
@@ -111,7 +233,15 @@ class DatabaseSeeder:
                 await job_log.log_info(
                     db_session,
                     job_id,
-                    f"Starting database seeding - {len(self.categories)} categories, {PAGES_PER_CATEGORY} pages each",
+                    (
+                        "Starting database seeding - "
+                        f"{len(self.active_categories)} categories, {PAGES_PER_CATEGORY} pages each"
+                    ),
+                )
+                await job_log.log_info(
+                    db_session,
+                    job_id,
+                    f"Selected categories: {selected_names}",
                 )
 
                 # Mark job as running
@@ -122,7 +252,7 @@ class DatabaseSeeder:
 
                 # Seed movies for each category (just movies, no associations)
                 overall_result = BatchProcessResult()
-                for category_key, category_info in self.categories.items():
+                for category_key, category_info in self.active_categories.items():
                     category_result = await self._seed_category_movies(
                         db_session,
                         job_id,
@@ -170,6 +300,7 @@ class DatabaseSeeder:
                 )
 
             except Exception as e:
+                await db_session.rollback()
                 if job_id:
                     await job_status.fail_job(
                         db_session,
@@ -191,7 +322,7 @@ class DatabaseSeeder:
     async def _create_categories(self, db: AsyncSession, job_id: int):
         await job_log.log_info(db, job_id, "Creating media categories...")
 
-        for category_key, category_info in self.categories.items():
+        for category_key, category_info in self.active_categories.items():
             try:
                 # Check if category already exists
                 existing_category = await media_category.get_by_name(
@@ -222,6 +353,7 @@ class DatabaseSeeder:
                 )
                 logger.error(error_msg)
                 await job_log.log_error(db, job_id, error_msg)
+                await db.rollback()
 
     async def _seed_category_movies(
         self, db: AsyncSession, job_id: int, category_name: str, method_name: str
@@ -268,12 +400,13 @@ class DatabaseSeeder:
 
                 # Process the batch using utility function
                 page_result = await process_movie_batch(
-                    db, self.tmdb_client, movie_ids, job_id
+                    db, self.tmdb_client, movie_ids, job_id, use_locks=True
                 )
 
                 category_result.attempted += page_result.attempted
                 category_result.succeeded += page_result.succeeded
                 category_result.failed += page_result.failed
+                category_result.skipped_locked += page_result.skipped_locked
 
                 await job_log.log_info(
                     db,
@@ -299,6 +432,7 @@ class DatabaseSeeder:
                 )
                 logger.error(error_msg)
                 await job_log.log_error(db, job_id, error_msg)
+                await db.rollback()
                 continue
 
         logger.info(
@@ -311,9 +445,9 @@ class DatabaseSeeder:
         return category_result
 
 
-async def main():
+async def main(selected_category_keys: Sequence[str] | None):
     try:
-        seeder = DatabaseSeeder()
+        seeder = DatabaseSeeder(selected_category_keys)
         await seeder.run()
     except KeyboardInterrupt:
         logger.info("Seeding interrupted by user")
@@ -323,4 +457,27 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    selected_keys: Sequence[str] | None = None
+
+    argv_tokens = sys.argv[1:]
+    if argv_tokens:
+        try:
+            selection, invalid = _parse_category_tokens(argv_tokens, CATEGORY_CATALOG)
+            if invalid:
+                print(f"Ignoring unrecognized selections: {', '.join(invalid)}")
+            if selection:
+                selected_keys = selection
+            else:
+                raise ValueError
+        except ValueError:
+            print("No valid categories provided via arguments.")
+            if not sys.stdin.isatty():
+                sys.exit(1)
+
+    if selected_keys is None:
+        if sys.stdin.isatty():
+            selected_keys = _prompt_for_category_selection(CATEGORY_CATALOG)
+        else:
+            selected_keys = list(CATEGORY_CATALOG.keys())
+
+    asyncio.run(main(selected_keys))
