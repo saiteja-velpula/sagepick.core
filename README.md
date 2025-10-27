@@ -58,7 +58,7 @@ Docker Workflow
   ```
   The container entrypoint runs `alembic upgrade head` on start before launching Uvicorn.
 
-- Override configuration by editing `.env.test` (used by Compose) or supplying your own env file.
+- Override configuration by editing `.env.local` (used by Compose) or supplying your own env file.
 
 Testing
 -------

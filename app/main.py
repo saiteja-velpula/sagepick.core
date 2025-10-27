@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.core.scheduler import job_scheduler
 from app.core.redis import redis_client
 from app.api import router
+from app import __version__ as app_version
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -44,7 +45,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sagepick Core",
     description="Sagepick Core Backend API and Services with Automated Cron Jobs",
-    version="1.0.0",
+    version=app_version,
     lifespan=lifespan,
 )
 
@@ -56,7 +57,7 @@ app.include_router(router)
 def read_root():
     return {
         "name": "Sagepick Core Backend!",
-        "version": "1.0.0",
+        "version": app_version,
         "description": "Movie recommendation system with automated TMDB data synchronization",
     }
 
