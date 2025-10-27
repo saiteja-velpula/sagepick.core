@@ -3,7 +3,8 @@ name: CI
 on:
   push:
     tags:
-      - "v*"
+      - feature/*
+      - fix/*
   pull_request:
     branches:
       - dev

@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 
 class RedisClient:
     """Redis client used for distributed movie-lock coordination."""
-    
+
     def __init__(self):
         self.redis: Optional[redis.Redis] = None
         self._initialized = False
-    
+
     async def initialize(self):
         """Initialize Redis connection."""
         if not self._initialized:
@@ -23,7 +23,7 @@ class RedisClient:
                     encoding="utf-8",
                     decode_responses=True,
                     max_connections=20,
-                    retry_on_timeout=True
+                    retry_on_timeout=True,
                 )
                 # Test connection
                 await self.redis.ping()
@@ -32,14 +32,14 @@ class RedisClient:
             except Exception as e:
                 logger.error(f"Failed to initialize Redis connection: {e}")
                 raise
-    
+
     async def close(self):
         """Close Redis connection."""
         if self.redis:
             await self.redis.close()
             self._initialized = False
             logger.info("Redis connection closed")
-    
+
     # Movie ID Locking for conflict resolution
     async def acquire_movie_lock(self, movie_id: int, timeout: int = 300) -> bool:
         """
@@ -48,7 +48,7 @@ class RedisClient:
         """
         if not self.redis:
             return False
-        
+
         lock_key = f"movie_lock:{movie_id}"
         try:
             # Use SET with NX (only if not exists) and EX (expiration)
@@ -57,12 +57,12 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Failed to acquire movie lock for {movie_id}: {e}")
             return False
-    
+
     async def release_movie_lock(self, movie_id: int) -> bool:
         """Release lock for a movie ID."""
         if not self.redis:
             return False
-        
+
         lock_key = f"movie_lock:{movie_id}"
         try:
             result = await self.redis.delete(lock_key)
@@ -70,12 +70,12 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Failed to release movie lock for {movie_id}: {e}")
             return False
-    
+
     async def extend_movie_lock(self, movie_id: int, timeout: int = 300) -> bool:
         """Extend the expiration time of a movie lock."""
         if not self.redis:
             return False
-        
+
         lock_key = f"movie_lock:{movie_id}"
         try:
             result = await self.redis.expire(lock_key, timeout)
@@ -83,7 +83,7 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Failed to extend movie lock for {movie_id}: {e}")
             return False
-    
+
     # Utility methods
     async def health_check(self) -> bool:
         """Check if Redis is healthy."""
@@ -102,7 +102,7 @@ class RedisClient:
             return {}
         try:
             return await self.redis.hgetall(key)
-        except Exception as exc: 
+        except Exception as exc:
             logger.error("Failed to read Redis hash %s: %s", key, exc)
             return {}
 
@@ -112,8 +112,10 @@ class RedisClient:
             return
         try:
             await self.redis.hset(key, field, value)
-        except Exception as exc: 
-            logger.error("Failed to persist Redis hash %s field %s: %s", key, field, exc)
+        except Exception as exc:
+            logger.error(
+                "Failed to persist Redis hash %s field %s: %s", key, field, exc
+            )
 
 
 # Global Redis client instance

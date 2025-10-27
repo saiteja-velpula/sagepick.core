@@ -16,8 +16,7 @@ from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("database_seeder")
 
@@ -25,76 +24,77 @@ logger = logging.getLogger("database_seeder")
 PAGES_PER_CATEGORY = 2
 API_DELAY = 0.25
 
+
 class DatabaseSeeder:
     def __init__(self):
         self.tmdb_client = None
-        
+
         # Category definitions with TMDB client method mappings
         self.categories = {
             "trending": {
                 "name": "Trending",
                 "description": "Movies that are currently trending",
-                "method": "get_trending_movies"
+                "method": "get_trending_movies",
             },
             "popular": {
                 "name": "Popular",
                 "description": "Most popular movies",
-                "method": "get_popular_movies"
+                "method": "get_popular_movies",
             },
             "top_rated": {
                 "name": "Top Rated",
                 "description": "Highest rated movies",
-                "method": "get_top_rated_movies"
+                "method": "get_top_rated_movies",
             },
             "upcoming": {
                 "name": "Upcoming",
                 "description": "Movies coming soon to theaters",
-                "method": "get_upcoming_movies"
+                "method": "get_upcoming_movies",
             },
             "now_playing": {
                 "name": "Now Playing",
                 "description": "Movies currently in theaters",
-                "method": "get_now_playing_movies"
+                "method": "get_now_playing_movies",
             },
             "bollywood": {
                 "name": "Bollywood",
                 "description": "Hindi movies from India",
-                "method": "get_bollywood_movies"
+                "method": "get_bollywood_movies",
             },
             "tollywood": {
                 "name": "Tollywood",
                 "description": "Telugu movies from India",
-                "method": "get_tollywood_movies"
+                "method": "get_tollywood_movies",
             },
             "kollywood": {
                 "name": "Kollywood",
                 "description": "Tamil movies from India",
-                "method": "get_kollywood_movies"
+                "method": "get_kollywood_movies",
             },
             "mollywood": {
                 "name": "Mollywood",
                 "description": "Malayalam movies from India",
-                "method": "get_mollywood_movies"
+                "method": "get_mollywood_movies",
             },
             "sandalwood": {
                 "name": "Sandalwood",
                 "description": "Kannada movies from India",
-                "method": "get_sandalwood_movies"
+                "method": "get_sandalwood_movies",
             },
             "hollywood": {
                 "name": "Hollywood",
                 "description": "English movies from Hollywood",
-                "method": "get_hollywood_movies"
-            }
+                "method": "get_hollywood_movies",
+            },
         }
 
     async def run(self):
         logger.info("Starting database seeding process...")
-        
+
         # Initialize services
         await redis_client.initialize()
         self.tmdb_client = TMDBClient()
-        
+
         async for db_session in get_session():
             job_id = None
             overall_result = BatchProcessResult()
@@ -104,39 +104,42 @@ class DatabaseSeeder:
                 job_status_record = await job_status.create_job(
                     db_session,
                     job_type=JobType.MOVIE_DISCOVERY,  # Use movie discovery type
-                    total_items=total_estimated_movies
+                    total_items=total_estimated_movies,
                 )
                 job_id = job_status_record.id
-                
+
                 await job_log.log_info(
                     db_session,
                     job_id,
-                    f"Starting database seeding - {len(self.categories)} categories, {PAGES_PER_CATEGORY} pages each"
+                    f"Starting database seeding - {len(self.categories)} categories, {PAGES_PER_CATEGORY} pages each",
                 )
-                
+
                 # Mark job as running
                 await job_status.start_job(db_session, job_id)
-                
+
                 # Create categories first
                 await self._create_categories(db_session, job_id)
-                
+
                 # Seed movies for each category (just movies, no associations)
                 overall_result = BatchProcessResult()
                 for category_key, category_info in self.categories.items():
                     category_result = await self._seed_category_movies(
-                        db_session, job_id, category_info["name"], category_info["method"]
+                        db_session,
+                        job_id,
+                        category_info["name"],
+                        category_info["method"],
                     )
                     overall_result.attempted += category_result.attempted
                     overall_result.succeeded += category_result.succeeded
                     overall_result.failed += category_result.failed
                     overall_result.skipped_locked += category_result.skipped_locked
-                
+
                 # Complete the job
                 await job_status.complete_job(
                     db_session,
                     job_id,
                     items_processed=overall_result.succeeded,
-                    failed_items=overall_result.failed
+                    failed_items=overall_result.failed,
                 )
                 await job_log.log_info(
                     db_session,
@@ -152,9 +155,9 @@ class DatabaseSeeder:
                         )
                         + ". "
                         "Category associations will be handled by category_refresh job."
-                    )
+                    ),
                 )
-                
+
                 logger.info(
                     "Database seeding completed! %d movies processed successfully, %d failed%s.",
                     overall_result.succeeded,
@@ -163,18 +166,20 @@ class DatabaseSeeder:
                         f", {overall_result.skipped_locked} skipped due to locks"
                         if overall_result.skipped_locked
                         else ""
-                    )
+                    ),
                 )
-                
+
             except Exception as e:
                 if job_id:
                     await job_status.fail_job(
                         db_session,
                         job_id,
                         processed_items=overall_result.succeeded,
-                        failed_items=overall_result.failed
+                        failed_items=overall_result.failed,
                     )
-                    await job_log.log_error(db_session, job_id, f"Seeding failed: {str(e)}")
+                    await job_log.log_error(
+                        db_session, job_id, f"Seeding failed: {str(e)}"
+                    )
                 logger.error(f"Database seeding failed: {str(e)}")
                 raise
             finally:
@@ -185,88 +190,94 @@ class DatabaseSeeder:
 
     async def _create_categories(self, db: AsyncSession, job_id: int):
         await job_log.log_info(db, job_id, "Creating media categories...")
-        
+
         for category_key, category_info in self.categories.items():
             try:
                 # Check if category already exists
-                existing_category = await media_category.get_by_name(db, category_info["name"])
-                
+                existing_category = await media_category.get_by_name(
+                    db, category_info["name"]
+                )
+
                 if existing_category:
-                    logger.info(f"Category '{category_info['name']}' already exists, skipping...")
+                    logger.info(
+                        f"Category '{category_info['name']}' already exists, skipping..."
+                    )
                     continue
-                
+
                 # Create new category
                 category_create = MediaCategoryBase(
-                    name=category_info["name"],
-                    description=category_info["description"]
+                    name=category_info["name"], description=category_info["description"]
                 )
-                
+
                 await media_category.create(db, obj_in=category_create)
                 logger.info(f"Created category: {category_info['name']}")
-                
+
                 await job_log.log_info(
                     db, job_id, f"Created category: {category_info['name']}"
                 )
-                
+
             except Exception as e:
-                error_msg = f"Failed to create category '{category_info['name']}': {str(e)}"
+                error_msg = (
+                    f"Failed to create category '{category_info['name']}': {str(e)}"
+                )
                 logger.error(error_msg)
                 await job_log.log_error(db, job_id, error_msg)
 
     async def _seed_category_movies(
-        self, 
-        db: AsyncSession, 
-        job_id: int, 
-        category_name: str,
-        method_name: str
+        self, db: AsyncSession, job_id: int, category_name: str, method_name: str
     ) -> BatchProcessResult:
         logger.info(f"Seeding movies from {category_name} category...")
-        
+
         await job_log.log_info(
-            db, job_id, 
-            f"Starting to seed {PAGES_PER_CATEGORY} pages from {category_name}"
+            db,
+            job_id,
+            f"Starting to seed {PAGES_PER_CATEGORY} pages from {category_name}",
         )
-        
+
         category_result = BatchProcessResult()
-        
+
         # Get TMDB client method
         if not hasattr(self.tmdb_client, method_name):
-            error_msg = f"TMDB client method '{method_name}' not found for {category_name}"
+            error_msg = (
+                f"TMDB client method '{method_name}' not found for {category_name}"
+            )
             logger.error(error_msg)
             await job_log.log_error(db, job_id, error_msg)
             return category_result
-        
+
         method = getattr(self.tmdb_client, method_name)
-        
+
         # Process each page
         for page in range(1, PAGES_PER_CATEGORY + 1):
             try:
-                logger.info(f"Processing page {page}/{PAGES_PER_CATEGORY} for {category_name}")
-                
+                logger.info(
+                    f"Processing page {page}/{PAGES_PER_CATEGORY} for {category_name}"
+                )
+
                 # Get movies from TMDB
                 movie_results = await method(page=page)
-                
+
                 if not movie_results or not movie_results.movies:
                     await job_log.log_warning(
-                        db, job_id, 
-                        f"No movies found for {category_name} page {page}"
+                        db, job_id, f"No movies found for {category_name} page {page}"
                     )
                     continue
-                
+
                 # Extract movie IDs
                 movie_ids = [movie.tmdb_id for movie in movie_results.movies]
-                
+
                 # Process the batch using utility function
                 page_result = await process_movie_batch(
                     db, self.tmdb_client, movie_ids, job_id
                 )
-                
+
                 category_result.attempted += page_result.attempted
                 category_result.succeeded += page_result.succeeded
                 category_result.failed += page_result.failed
-                
+
                 await job_log.log_info(
-                    db, job_id,
+                    db,
+                    job_id,
                     (
                         f"Completed page {page} for {category_name}: "
                         f"{page_result.succeeded} succeeded, "
@@ -276,24 +287,26 @@ class DatabaseSeeder:
                             if page_result.skipped_locked
                             else ""
                         )
-                    )
+                    ),
                 )
-                
+
                 # Add delay between pages
                 await asyncio.sleep(API_DELAY)
-                
+
             except Exception as e:
-                error_msg = f"Failed to process page {page} for {category_name}: {str(e)}"
+                error_msg = (
+                    f"Failed to process page {page} for {category_name}: {str(e)}"
+                )
                 logger.error(error_msg)
                 await job_log.log_error(db, job_id, error_msg)
                 continue
-        
+
         logger.info(
             "Completed seeding for %s: %d succeeded, %d failed out of %d",
             category_name,
             category_result.succeeded,
             category_result.failed,
-            category_result.attempted
+            category_result.attempted,
         )
         return category_result
 

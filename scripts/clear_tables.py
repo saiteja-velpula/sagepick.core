@@ -9,9 +9,11 @@ from sqlmodel import SQLModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.core.db import engine, close_db
-import app.models # noqa: F401
+import app.models  # noqa: F401
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger("clear_tables")
 
 

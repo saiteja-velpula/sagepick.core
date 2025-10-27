@@ -14,11 +14,14 @@ class KeywordBase(SQLModel):
 class Keyword(KeywordBase, table=True):
     __tablename__ = "keywords"
     id: Optional[int] = Field(default=None, primary_key=True)
-    
+
     # Many-to-many relationship with movies
-    movies: List["Movie"] = Relationship(back_populates="keywords", link_model=MovieKeyword)
+    movies: List["Movie"] = Relationship(
+        back_populates="keywords", link_model=MovieKeyword
+    )
 
 
 class KeywordRead(KeywordBase):
     """Schema for reading a keyword."""
+
     id: int

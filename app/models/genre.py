@@ -14,7 +14,7 @@ class GenreBase(SQLModel):
 class Genre(GenreBase, table=True):
     __tablename__ = "genres"
     id: Optional[int] = Field(default=None, primary_key=True)
-    
+
     # Many-to-many relationship with movies
     movies: List["Movie"] = Relationship(back_populates="genres", link_model=MovieGenre)
 

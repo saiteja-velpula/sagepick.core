@@ -23,7 +23,9 @@ async def test_process_movie_batch_aggregates_status(monkeypatch):
     async def fake_get_map(*args, **kwargs):
         return {}
 
-    monkeypatch.setattr(movie_processor.job_status, "increment_counts", fake_increment_counts)
+    monkeypatch.setattr(
+        movie_processor.job_status, "increment_counts", fake_increment_counts
+    )
     monkeypatch.setattr(movie_processor.job_log, "log_info", fake_log)
     monkeypatch.setattr(movie_processor.job_log, "log_warning", fake_log)
     monkeypatch.setattr(movie_processor.job_log, "log_error", fake_log)
