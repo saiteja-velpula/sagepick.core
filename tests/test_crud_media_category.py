@@ -55,8 +55,6 @@ async def test_update_category_movies_deduplicates_and_preserves_order():
     )
 
     assert session.deleted == existing
-    added_pairs = [
-        (item.media_category_id, item.movie_id) for item in session.added
-    ]
+    added_pairs = [(item.media_category_id, item.movie_id) for item in session.added]
     assert added_pairs == [(7, 10), (7, 11), (7, 12), (7, 13)]
     assert session.committed is True

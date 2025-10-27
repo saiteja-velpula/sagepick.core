@@ -80,7 +80,9 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         result = await db.execute(statement)
         existing_relations = result.scalars().all()
 
-        existing_by_genre = {relation.genre_id: relation for relation in existing_relations}
+        existing_by_genre = {
+            relation.genre_id: relation for relation in existing_relations
+        }
 
         # Normalise desired genres (preserve order, skip duplicates/None)
         ordered_genre_ids: List[int] = []

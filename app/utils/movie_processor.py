@@ -239,7 +239,9 @@ async def process_tmdb_movie(
 
         if pending_keywords:
             await db.flush()
-            for (index, keyword_id), keyword_obj in zip(pending_keywords, keyword_objects):
+            for (index, keyword_id), keyword_obj in zip(
+                pending_keywords, keyword_objects
+            ):
                 keyword_db_ids[index] = keyword_obj.id
                 caches.keywords[keyword_id] = keyword_obj.id
                 await _keyword_cache.set(keyword_id, keyword_obj.id)

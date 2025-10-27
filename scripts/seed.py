@@ -87,9 +87,11 @@ CATEGORY_CATALOG: Dict[str, Dict[str, str]] = {
 
 
 def _enumerate_categories(
-    categories: Dict[str, Dict[str, str]]
+    categories: Dict[str, Dict[str, str]],
 ) -> List[Tuple[int, str, Dict[str, str]]]:
-    return [(index, key, meta) for index, (key, meta) in enumerate(categories.items(), 1)]
+    return [
+        (index, key, meta) for index, (key, meta) in enumerate(categories.items(), 1)
+    ]
 
 
 def _parse_category_tokens(
@@ -133,9 +135,7 @@ def _parse_category_tokens(
     return selected, invalid
 
 
-def _prompt_for_category_selection(
-    categories: Dict[str, Dict[str, str]]
-) -> List[str]:
+def _prompt_for_category_selection(categories: Dict[str, Dict[str, str]]) -> List[str]:
     menu = _enumerate_categories(categories)
     print("Available categories to seed:")
     for index, _, meta in menu:
@@ -166,9 +166,7 @@ class DatabaseSeeder:
             key: self.categories[key] for key in self.selected_keys
         }
 
-    def _resolve_selected_keys(
-        self, selected_keys: Sequence[str] | None
-    ) -> List[str]:
+    def _resolve_selected_keys(self, selected_keys: Sequence[str] | None) -> List[str]:
         if not selected_keys:
             return list(self.categories.keys())
 
