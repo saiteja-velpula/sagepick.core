@@ -1,6 +1,6 @@
 [project]
 name = "sagepick-core"
-version = "0.1.0"
+version = "0.1.3"
 authors = [
     { name = "geetheswar-v", email = "geetheswar.edu@gmail.com" },
     { name = "saiteja-velpula", email = "saitejavelpula.nss@gmail.com" }
