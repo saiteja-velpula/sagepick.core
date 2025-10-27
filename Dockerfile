@@ -22,6 +22,7 @@ RUN pip install --upgrade pip \
 COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
+COPY scripts ./scripts
 COPY docker/entrypoint.sh ./entrypoint.sh
 
 RUN chmod +x entrypoint.sh

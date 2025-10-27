@@ -37,3 +37,12 @@ jobs:
           TAG=${{ github.event.release.tag_name }}
           docker push $IMAGE_NAME:$TAG
           docker push $IMAGE_NAME:latest
+
+      - name: Trigger deployment webhook
+        env:
+          WEBHOOK_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
+        run: |
+          curl -X POST \
+            -H "Accept: application/json" \
+            -H "X-Webhook-Token: ${WEBHOOK_TOKEN}" \
+            https://deploy.sagepick.in/core
