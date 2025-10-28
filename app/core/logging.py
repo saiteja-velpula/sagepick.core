@@ -1,7 +1,7 @@
 import uuid
 import logging
 import json
-from typing import Optional, Dict, Any
+from typing import Optional
 from contextvars import ContextVar
 from fastapi import Request
 from datetime import datetime

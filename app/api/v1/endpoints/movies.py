@@ -18,7 +18,6 @@ from app.models.media_category_movie import MediaCategoryMovie
 from app.models.genre import Genre
 from app.models.keyword import Keyword
 from app.models.movie_genre import MovieGenre
-from app.models.movie_keyword import MovieKeyword
 from app.api.deps import verify_token
 from app.models.api_models import (
     MovieListItem,
@@ -28,7 +27,6 @@ from app.models.api_models import (
 )
 from app.utils.pagination import (
     PaginatedResponse,
-    PaginationInfo,
     create_pagination_info,
     calculate_offset,
 )
