@@ -4,12 +4,15 @@ from fastapi import FastAPI
 
 from app.core.scheduler import job_scheduler
 from app.core.redis import redis_client
+from app.core.exceptions import register_exception_handlers
+from app.core.middleware import CorrelationIdMiddleware
+from app.core.logging import setup_logging, get_structured_logger
 from app.api import router
 from app import __version__ as app_version
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup structured logging
+setup_logging(use_json=False, correlation_id_in_format=True)
+logger = get_structured_logger(__name__)
 
 
 @asynccontextmanager
@@ -48,6 +51,12 @@ app = FastAPI(
     version=app_version,
     lifespan=lifespan,
 )
+
+# Add middleware
+app.add_middleware(CorrelationIdMiddleware)
+
+# Register exception handlers
+register_exception_handlers(app)
 
 app.include_router(router)
 
