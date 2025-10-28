@@ -54,41 +54,46 @@ class JobScheduler:
             )
 
         try:
-            # Job 1: Movie Discovery Job - Every 5 minutes
+            # Job 1: Movie Discovery Job - Configurable interval
             next_run_time = datetime.utcnow()
             delay_minutes = settings.MOVIE_DISCOVERY_START_DELAY_MINUTES
             if delay_minutes > 0:
                 next_run_time = datetime.utcnow() + timedelta(minutes=delay_minutes)
 
+            discovery_interval = settings.JOBS.movie_discovery_interval_minutes
             self.scheduler.add_job(
                 func=movie_discovery_job.run,
-                trigger=IntervalTrigger(minutes=2),
+                trigger=IntervalTrigger(minutes=discovery_interval),
                 id="movie_discovery_job",
                 name="Movie Discovery Job",
                 replace_existing=True,
                 next_run_time=next_run_time,
             )
-            logger.info("Configured Movie Discovery Job - runs every 5 minutes")
+            logger.info(f"Configured Movie Discovery Job - runs every {discovery_interval} minutes")
 
-            # Job 2: Change Tracking Job - Daily at 2:00 AM UTC
+            # Job 2: Change Tracking Job - Configurable daily time
+            change_hour = settings.JOBS.change_tracking_hour
+            change_minute = settings.JOBS.change_tracking_minute
             self.scheduler.add_job(
                 func=change_tracking_job.run,
-                trigger=CronTrigger(hour=2, minute=0),
+                trigger=CronTrigger(hour=change_hour, minute=change_minute),
                 id="change_tracking_job",
                 name="Change Tracking Job",
                 replace_existing=True,
             )
-            logger.info("Configured Change Tracking Job - runs daily at 2:00 AM UTC")
+            logger.info(f"Configured Change Tracking Job - runs daily at {change_hour:02d}:{change_minute:02d} UTC")
 
-            # Job 3: Category Refresh Job - Daily at 5:00 AM UTC
+            # Job 3: Category Refresh Job - Configurable daily time
+            refresh_hour = settings.JOBS.category_refresh_hour
+            refresh_minute = settings.JOBS.category_refresh_minute
             self.scheduler.add_job(
                 func=category_refresh_job.run,
-                trigger=CronTrigger(hour=5, minute=0),
+                trigger=CronTrigger(hour=refresh_hour, minute=refresh_minute),
                 id="category_refresh_job",
                 name="Category Refresh Job",
                 replace_existing=True,
             )
-            logger.info("Configured Category Refresh Job - runs daily at 5:00 AM UTC")
+            logger.info(f"Configured Category Refresh Job - runs daily at {refresh_hour:02d}:{refresh_minute:02d} UTC")
 
             self._jobs_configured = True
             logger.info("All jobs configured successfully")

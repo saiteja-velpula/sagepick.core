@@ -1,28 +1,8 @@
-from typing import List, Generic, TypeVar, Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 from .movie import MovieBase
 from .genre import GenreRead
 from .keyword import KeywordRead
-
-T = TypeVar("T")
-
-
-class PaginationInfo(BaseModel):
-    """Pagination metadata."""
-
-    page: int = Field(description="Current page number")
-    per_page: int = Field(description="Items per page")
-    total_items: int = Field(description="Total number of items")
-    total_pages: int = Field(description="Total number of pages")
-    has_next: bool = Field(description="Whether there is a next page")
-    has_prev: bool = Field(description="Whether there is a previous page")
-
-
-class PaginatedResponse(BaseModel, Generic[T]):
-    """Generic paginated response."""
-
-    data: List[T] = Field(description="List of items")
-    pagination: PaginationInfo = Field(description="Pagination information")
 
 
 class MovieListItem(BaseModel):
