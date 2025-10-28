@@ -3,11 +3,11 @@ Movies API endpoints for SAGEPICK movie data management.
 """
 
 from typing import List, Optional
-from math import ceil
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, func
 from sqlalchemy import or_
+from sqlalchemy.orm import selectinload
 
 from app.core.db import get_session
 from app.crud.movie import movie as movie_crud
@@ -21,30 +21,19 @@ from app.models.movie_genre import MovieGenre
 from app.models.movie_keyword import MovieKeyword
 from app.api.deps import verify_token
 from app.models.api_models import (
-    PaginatedResponse,
-    PaginationInfo,
     MovieListItem,
     MovieFullDetail,
     GenreDict,
     KeywordDict,
 )
+from app.utils.pagination import (
+    PaginatedResponse,
+    PaginationInfo,
+    create_pagination_info,
+    calculate_offset,
+)
 
 router = APIRouter()
-
-
-# Helper function to create pagination info
-def create_pagination_info(
-    page: int, per_page: int, total_items: int
-) -> PaginationInfo:
-    total_pages = ceil(total_items / per_page) if total_items > 0 else 1
-    return PaginationInfo(
-        page=page,
-        per_page=per_page,
-        total_items=total_items,
-        total_pages=total_pages,
-        has_next=page < total_pages,
-        has_prev=page > 1,
-    )
 
 
 # Movie Endpoints
@@ -67,7 +56,7 @@ async def get_movies(
     token: dict = Depends(verify_token),
 ):
     """Get paginated list of movies with essential fields only."""
-    offset = (page - 1) * per_page
+    offset = calculate_offset(page, per_page)
 
     # Build the query
     query = select(Movie)
@@ -167,29 +156,28 @@ async def get_movie_by_id(
     token: dict = Depends(verify_token),
 ):
     """Get movie by ID with all details including genres and keywords."""
-    # Get movie
-    movie_obj = await movie_crud.get(db, movie_id)
+    # Use eager loading to fetch movie with relationships in a single query
+    query = (
+        select(Movie)
+        .options(
+            selectinload(Movie.genres),
+            selectinload(Movie.keywords)
+        )
+        .where(Movie.id == movie_id)
+    )
+    
+    result = await db.execute(query)
+    movie_obj = result.scalar_one_or_none()
+    
     if not movie_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Movie not found"
         )
 
-    # Get genres
-    genres_query = select(Genre).join(MovieGenre).where(MovieGenre.movie_id == movie_id)
-    genres_result = await db.execute(genres_query)
-    genres = genres_result.scalars().all()
-
-    # Get keywords
-    keywords_query = (
-        select(Keyword).join(MovieKeyword).where(MovieKeyword.movie_id == movie_id)
-    )
-    keywords_result = await db.execute(keywords_query)
-    keywords = keywords_result.scalars().all()
-
-    # Convert to response format
-    genres_dict = [GenreDict(id=genre.id, name=genre.name) for genre in genres]
+    # Convert to response format using eager-loaded relationships
+    genres_dict = [GenreDict(id=genre.id, name=genre.name) for genre in movie_obj.genres]
     keywords_dict = [
-        KeywordDict(id=keyword.id, name=keyword.name) for keyword in keywords
+        KeywordDict(id=keyword.id, name=keyword.name) for keyword in movie_obj.keywords
     ]
 
     return MovieFullDetail(
@@ -274,7 +262,7 @@ async def get_movies_by_category(
             status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
         )
 
-    offset = (page - 1) * per_page
+    offset = calculate_offset(page, per_page)
 
     # Query movies in category
     movies_query = (
