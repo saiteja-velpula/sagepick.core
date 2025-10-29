@@ -1,18 +1,15 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from time import monotonic
-from typing import Awaitable, Callable, Dict, List, Optional, TypeVar
+from typing import List, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from app.services.tmdb_client.client import TMDBClient
-from app.crud import movie, genre, keyword, job_log, job_status
-from app.core.redis import redis_client
-from app.core.settings import settings
+from app.crud import movie, job_log, job_status
 from app.models.movie import Movie, MovieCreate
-from app.models.genre import Genre
-from app.models.keyword import Keyword
+from app.utils.rate_limiter import tmdb_rate_limiter, rate_limited_call
+from app.utils.processors import genre_processor, keyword_processor
 
 logger = logging.getLogger(__name__)
 
@@ -25,267 +22,102 @@ class BatchProcessResult:
     skipped_locked: int = 0
 
 
-@dataclass
-class _LookupCaches:
-    genres: Dict[int, int]
-    keywords: Dict[int, int]
+class MovieProcessor:
+    def __init__(self):
+        self.genre_processor = genre_processor
+        self.keyword_processor = keyword_processor
+        self.rate_limiter = tmdb_rate_limiter
 
+    async def process_movie(
+        self,
+        db: AsyncSession,
+        tmdb_client: TMDBClient,
+        movie_id: int,
+        job_id: Optional[int] = None,
+    ) -> Optional[Movie]:
+        """
+        Process a single movie from TMDB.
 
-class _GenreCache:
-    """Process-wide genre cache hydrated from the database once."""
+        Args:
+            db: Database session
+            tmdb_client: TMDB API client
+            movie_id: TMDB movie ID
+            job_id: Optional job ID for logging
 
-    def __init__(self) -> None:
-        self._loaded = False
-        self._lock = asyncio.Lock()
-        self._map: Dict[int, int] = {}
-
-    async def get_map(self, db: AsyncSession) -> Dict[int, int]:
-        if self._loaded:
-            return self._map
-
-        async with self._lock:
-            if not self._loaded:
-                result = await db.execute(select(Genre.tmdb_id, Genre.id))
-                rows = result.all()
-                self._map = {int(tmdb_id): int(db_id) for tmdb_id, db_id in rows}
-                self._loaded = True
-        return self._map
-
-    def set(self, tmdb_id: int, local_id: int) -> None:
-        self._map[tmdb_id] = local_id
-
-
-class _KeywordCache:
-    """Redis-backed keyword cache with an in-process mirror."""
-
-    _REDIS_HASH_KEY = "sagepick:tmdb:keywords"
-
-    def __init__(self) -> None:
-        self._loaded = False
-        self._lock = asyncio.Lock()
-        self._map: Dict[int, int] = {}
-
-    async def get_map(self) -> Dict[int, int]:
-        if self._loaded:
-            return self._map
-
-        async with self._lock:
-            if not self._loaded:
-                await self._load()
-        return self._map
-
-    async def _load(self) -> None:
+        Returns:
+            Movie object if successful, None if failed
+        """
         try:
-            await redis_client.initialize()
-        except Exception as exc:
-            logger.warning(
-                "Keyword cache unavailable; proceeding without Redis: %s", exc
-            )
-            self._map = {}
-            self._loaded = True
-            return
-
-        data = await redis_client.hgetall(self._REDIS_HASH_KEY)
-        self._map = {int(k): int(v) for k, v in data.items()}
-        self._loaded = True
-
-    async def set(self, tmdb_id: int, local_id: int) -> None:
-        already_known = tmdb_id in self._map
-        self._map[tmdb_id] = local_id
-
-        if not redis_client.redis:
-            return
-
-        if already_known or len(self._map) <= settings.TMDB_KEYWORD_CACHE_MAX_ENTRIES:
-            await redis_client.hset(self._REDIS_HASH_KEY, tmdb_id, local_id)
-        else:
-            logger.debug(
-                "Skipping Redis keyword persist; cache limit %s reached",
-                settings.TMDB_KEYWORD_CACHE_MAX_ENTRIES,
+            # Fetch movie data from TMDB with rate limiting
+            movie_details, keywords = await asyncio.gather(
+                rate_limited_call(
+                    self.rate_limiter, lambda: tmdb_client.get_movie_by_id(movie_id)
+                ),
+                rate_limited_call(
+                    self.rate_limiter, lambda: tmdb_client.get_movie_keywords(movie_id)
+                ),
             )
 
+            if not movie_details:
+                if job_id:
+                    await job_log.log_warning(
+                        db, job_id, f"Could not fetch details for movie {movie_id}"
+                    )
+                return None
 
-class _AsyncRateLimiter:
-    """Simple async limiter that spaces calls to respect TMDB quotas."""
+            # Process related entities
+            genre_ids = await self.genre_processor.process_genres(
+                db, movie_details.genres, job_id
+            )
+            keyword_ids = await self.keyword_processor.process_keywords(
+                db, keywords, job_id
+            )
 
-    def __init__(self, max_per_second: int):
-        self._interval = 1.0 / max(1, max_per_second)
-        self._lock = asyncio.Lock()
-        self._last_acquire = 0.0
+            # Create movie object
+            movie_create = MovieCreate(
+                tmdb_id=movie_details.tmdb_id,
+                title=movie_details.title,
+                original_title=movie_details.original_title,
+                overview=movie_details.overview or "",
+                release_date=movie_details.release_date,
+                runtime=movie_details.runtime,
+                budget=movie_details.budget or 0,
+                revenue=movie_details.revenue or 0,
+                vote_average=movie_details.vote_average,
+                vote_count=movie_details.vote_count,
+                popularity=movie_details.popularity,
+                poster_path=movie_details.poster_path,
+                backdrop_path=movie_details.backdrop_path,
+                adult=movie_details.adult,
+                original_language=movie_details.original_language,
+                status=movie_details.status or "",
+            )
 
-    async def acquire(self) -> None:
-        async with self._lock:
-            now = monotonic()
-            elapsed = now - self._last_acquire
-            if elapsed < self._interval:
-                await asyncio.sleep(self._interval - elapsed)
-            self._last_acquire = monotonic()
+            # Save movie with relationships
+            movie_obj = await movie.upsert_movie_with_relationships(
+                db,
+                movie_create=movie_create,
+                genre_ids=genre_ids,
+                keyword_ids=keyword_ids,
+                commit=False,
+            )
 
+            await db.flush()
+            return movie_obj
 
-_T = TypeVar("_T")
-_genre_cache = _GenreCache()
-_keyword_cache = _KeywordCache()
-_rate_limiter = _AsyncRateLimiter(settings.TMDB_MAX_REQUESTS_PER_SECOND)
+        except Exception as e:
+            await db.rollback()
 
-
-async def _call_with_rate_limit(
-    limiter: _AsyncRateLimiter, coro_factory: Callable[[], Awaitable[_T]]
-) -> _T:
-    await limiter.acquire()
-    return await coro_factory()
-
-
-async def process_tmdb_movie(
-    db: AsyncSession,
-    tmdb_client: TMDBClient,
-    movie_id: int,
-    caches: _LookupCaches,
-    job_id: Optional[int] = None,
-    *,
-    rate_limiter: Optional[_AsyncRateLimiter] = None,
-) -> Optional[Movie]:
-    try:
-        limiter = rate_limiter or _rate_limiter
-
-        movie_details, keywords = await asyncio.gather(
-            _call_with_rate_limit(
-                limiter, lambda: tmdb_client.get_movie_by_id(movie_id)
-            ),
-            _call_with_rate_limit(
-                limiter, lambda: tmdb_client.get_movie_keywords(movie_id)
-            ),
-        )
-
-        if not movie_details:
             if job_id:
-                await job_log.log_warning(
-                    db, job_id, f"Could not fetch details for movie {movie_id}"
+                await job_log.log_error(
+                    db, job_id, f"Error processing movie {movie_id}: {str(e)}"
                 )
+            logger.error(f"Error processing movie {movie_id}: {str(e)}", exc_info=True)
             return None
 
-        # Process genres
-        genre_ids: List[int] = []
-        pending_genres: List[tuple[int, int, Genre]] = []
-        seen_genres: set[int] = set()
-        if movie_details.genres:
-            for genre_data in movie_details.genres:
-                if genre_data.id in seen_genres:
-                    continue
-                seen_genres.add(genre_data.id)
 
-                cached_id = caches.genres.get(genre_data.id)
-                if cached_id is not None:
-                    genre_ids.append(cached_id)
-                    continue
-
-                genre_obj = await genre.upsert_genre(
-                    db,
-                    genre_id=genre_data.id,
-                    name=genre_data.name,
-                    commit=False,
-                    flush=False,
-                )
-
-                if genre_obj.id is not None:
-                    # Existing genre retrieved; safe to use immediately.
-                    caches.genres[genre_data.id] = genre_obj.id
-                    _genre_cache.set(genre_data.id, genre_obj.id)
-                    genre_ids.append(genre_obj.id)
-                    continue
-
-                genre_ids.append(0)  # Placeholder updated after flush.
-                pending_genres.append((len(genre_ids) - 1, genre_data.id, genre_obj))
-
-        if pending_genres:
-            await db.flush()
-            for index, tmdb_id, genre_obj in pending_genres:
-                genre_ids[index] = genre_obj.id
-                caches.genres[tmdb_id] = genre_obj.id
-                _genre_cache.set(tmdb_id, genre_obj.id)
-
-        # Process keywords
-        keyword_db_ids: List[int] = []
-        pending_keywords: List[tuple[int, int]] = []  # (index, keyword_id)
-        keyword_objects: List[Keyword] = []
-        seen_keywords: set[int] = set()
-        if keywords and keywords.keywords:
-            for kw in keywords.keywords:
-                if kw.id in seen_keywords:
-                    continue
-                seen_keywords.add(kw.id)
-
-                cached_id = caches.keywords.get(kw.id)
-                if cached_id is not None:
-                    keyword_db_ids.append(cached_id)
-                    continue
-
-                keyword_obj = await keyword.upsert_keyword(
-                    db,
-                    keyword_id=kw.id,
-                    name=kw.name,
-                    commit=False,
-                    flush=False,
-                )
-
-                if keyword_obj.id is not None:
-                    caches.keywords[kw.id] = keyword_obj.id
-                    await _keyword_cache.set(kw.id, keyword_obj.id)
-                    keyword_db_ids.append(keyword_obj.id)
-                    continue
-
-                keyword_db_ids.append(0)  # Placeholder until flush assigns id.
-                pending_keywords.append((len(keyword_db_ids) - 1, kw.id))
-                keyword_objects.append(keyword_obj)
-
-        if pending_keywords:
-            await db.flush()
-            for (index, keyword_id), keyword_obj in zip(
-                pending_keywords, keyword_objects
-            ):
-                keyword_db_ids[index] = keyword_obj.id
-                caches.keywords[keyword_id] = keyword_obj.id
-                await _keyword_cache.set(keyword_id, keyword_obj.id)
-
-        # Create movie object with full details
-        movie_create = MovieCreate(
-            tmdb_id=movie_details.tmdb_id,
-            title=movie_details.title,
-            original_title=movie_details.original_title,
-            overview=movie_details.overview or "",
-            release_date=movie_details.release_date,
-            runtime=movie_details.runtime,
-            budget=movie_details.budget or 0,
-            revenue=movie_details.revenue or 0,
-            vote_average=movie_details.vote_average,
-            vote_count=movie_details.vote_count,
-            popularity=movie_details.popularity,
-            poster_path=movie_details.poster_path,
-            backdrop_path=movie_details.backdrop_path,
-            adult=movie_details.adult,
-            original_language=movie_details.original_language,
-            status=movie_details.status or "",
-        )
-
-        # Upsert movie with relationships
-        movie_obj = await movie.upsert_movie_with_relationships(
-            db,
-            movie_create=movie_create,
-            genre_ids=genre_ids,
-            keyword_ids=keyword_db_ids,
-            commit=False,
-        )
-
-        await db.flush()
-
-        return movie_obj
-
-    except Exception as e:
-        if job_id:
-            await job_log.log_error(
-                db, job_id, f"Error processing movie {movie_id}: {str(e)}"
-            )
-        logger.error(f"Error processing movie {movie_id}: {str(e)}", exc_info=True)
-        return None
+# Global processor instance
+movie_processor = MovieProcessor()
 
 
 async def process_movie_batch(
@@ -297,108 +129,104 @@ async def process_movie_batch(
     use_locks: bool = False,
     cancel_event: Optional[asyncio.Event] = None,
 ) -> BatchProcessResult:
-    result_summary = BatchProcessResult()
-    cancellation_noted = False
-    genre_seed = await _genre_cache.get_map(db)
-    keyword_seed = await _keyword_cache.get_map()
-    caches = _LookupCaches(genres=genre_seed, keywords=keyword_seed)
-    processed_delta = 0
-    failed_delta = 0
+    """
+    Process multiple movies in batch.
 
-    # Deduplicate while preserving order so we do not reprocess the same movie twice per batch
+    Args:
+        db: Database session
+        tmdb_client: TMDB API client
+        movie_ids: List of TMDB movie IDs to process
+        job_id: Optional job ID for logging
+        use_locks: Whether to use Redis locks (requires redis_client)
+        cancel_event: Event to signal cancellation
+
+    Returns:
+        BatchProcessResult with statistics
+    """
+    result = BatchProcessResult()
+
+    # Import here to avoid circular dependencies
+    from app.core.redis import redis_client
+
+    # Deduplicate while preserving order
     unique_movie_ids = list(dict.fromkeys(movie_ids))
 
     for movie_id in unique_movie_ids:
+        # Check for cancellation
         if cancel_event and cancel_event.is_set():
-            if job_id and not cancellation_noted:
+            if job_id:
                 await job_log.log_warning(
-                    db,
-                    job_id,
-                    "Cancellation requested; stopping remaining movie processing",
+                    db, job_id, "Cancellation requested; stopping movie processing"
                 )
-                cancellation_noted = True
             break
 
-        result_summary.attempted += 1
-
+        result.attempted += 1
         lock_acquired = True
+
+        # Acquire lock if needed
         if use_locks:
             try:
                 lock_acquired = await redis_client.acquire_movie_lock(movie_id)
-            except Exception as exc:
+            except Exception as e:
+                logger.error(f"Failed to acquire lock for movie {movie_id}: {e}")
                 lock_acquired = False
-                logger.error(
-                    "Failed to acquire lock for movie %s: %s",
-                    movie_id,
-                    exc,
-                    exc_info=True,
-                )
 
         if not lock_acquired:
-            result_summary.failed += 1
-            result_summary.skipped_locked += 1
+            result.failed += 1
+            result.skipped_locked += 1
             if job_id:
                 await job_log.log_info(
                     db, job_id, f"Skipped movie {movie_id} due to existing lock"
                 )
-                failed_delta += 1
             continue
 
         try:
-            processed_movie = await process_tmdb_movie(
-                db, tmdb_client, movie_id, caches, job_id=job_id
+            # Process the movie
+            processed_movie = await movie_processor.process_movie(
+                db, tmdb_client, movie_id, job_id
             )
+
             if processed_movie:
-                result_summary.succeeded += 1
-                if job_id:
-                    processed_delta += 1
+                result.succeeded += 1
             else:
-                result_summary.failed += 1
-                if job_id:
-                    failed_delta += 1
-        except Exception as exc:
-            result_summary.failed += 1
+                result.failed += 1
+
+        except Exception as e:
+            result.failed += 1
             if job_id:
                 await job_log.log_error(
-                    db,
-                    job_id,
-                    f"Unhandled error processing movie {movie_id}: {str(exc)}",
+                    db, job_id, f"Unhandled error processing movie {movie_id}: {str(e)}"
                 )
-                failed_delta += 1
             logger.error(
-                "Unhandled error processing movie %s: %s", movie_id, exc, exc_info=True
+                f"Unhandled error processing movie {movie_id}: {str(e)}", exc_info=True
             )
+
         finally:
+            # Release lock if acquired
             if use_locks and lock_acquired:
                 try:
                     await redis_client.release_movie_lock(movie_id)
-                except Exception as exc:
-                    logger.error(
-                        "Failed to release lock for movie %s: %s",
-                        movie_id,
-                        exc,
-                        exc_info=True,
-                    )
+                except Exception as e:
+                    logger.error(f"Failed to release lock for movie {movie_id}: {e}")
 
-    if job_id and (processed_delta or failed_delta):
+    # Update job status if tracking
+    if job_id and (result.succeeded or result.failed):
         await job_status.increment_counts(
-            db, job_id, processed_delta=processed_delta, failed_delta=failed_delta
+            db, job_id, processed_delta=result.succeeded, failed_delta=result.failed
         )
 
+    # Log summary
     if job_id:
         await job_log.log_info(
             db,
             job_id,
-            (
-                "Batch processing complete: "
-                f"{result_summary.succeeded}/{result_summary.attempted} succeeded, "
-                f"{result_summary.failed} failed"
-                + (
-                    f" ({result_summary.skipped_locked} skipped due to locks)"
-                    if result_summary.skipped_locked
-                    else ""
-                )
+            f"Batch complete: {result.succeeded}/{result.attempted} succeeded, "
+            f"{result.failed} failed"
+            + (
+                f" ({result.skipped_locked} skipped due to locks)"
+                if result.skipped_locked
+                else ""
             ),
         )
 
-    return result_summary
+    return result

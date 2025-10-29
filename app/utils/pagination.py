@@ -2,11 +2,12 @@ from math import ceil
 from typing import TypeVar, Generic, List
 from pydantic import BaseModel
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class PaginationInfo(BaseModel):
     """Pagination metadata."""
+
     page: int
     per_page: int
     total_items: int
@@ -17,6 +18,7 @@ class PaginationInfo(BaseModel):
 
 class PaginatedResponse(BaseModel, Generic[T]):
     """Generic paginated response wrapper."""
+
     data: List[T]
     pagination: PaginationInfo
 
