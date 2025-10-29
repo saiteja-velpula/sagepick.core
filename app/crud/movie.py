@@ -167,6 +167,20 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         result = await db.execute(statement)
         return result.scalars().all()
 
+    async def get_by_tmdb_ids(
+        self, db: AsyncSession, tmdb_ids: List[int]
+    ) -> List[Movie]:
+        """Alias for get_movies_by_tmdb_ids for consistency."""
+        return await self.get_movies_by_tmdb_ids(db, tmdb_ids)
+
+    async def get_multi_by_ids(
+        self, db: AsyncSession, ids: List[int]
+    ) -> List[Movie]:
+        """Get multiple movies by their internal IDs."""
+        statement = select(Movie).where(Movie.id.in_(ids))
+        result = await db.execute(statement)
+        return result.scalars().all()
+
 
 # Singleton instance
 movie = CRUDMovie(Movie)

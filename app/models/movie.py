@@ -4,12 +4,10 @@ from sqlalchemy import BigInteger, Column
 from sqlmodel import SQLModel, Field, Relationship
 from .movie_genre import MovieGenre
 from .movie_keyword import MovieKeyword
-from .media_category_movie import MediaCategoryMovie
 
 if TYPE_CHECKING:
     from .genre import Genre
     from .keyword import Keyword
-    from .media_category import MediaCategory
 
 
 class MovieBase(SQLModel):
@@ -71,9 +69,6 @@ class Movie(MovieBase, table=True):
     genres: List["Genre"] = Relationship(back_populates="movies", link_model=MovieGenre)
     keywords: List["Keyword"] = Relationship(
         back_populates="movies", link_model=MovieKeyword
-    )
-    media_categories: List["MediaCategory"] = Relationship(
-        back_populates="movies", link_model=MediaCategoryMovie
     )
 
 

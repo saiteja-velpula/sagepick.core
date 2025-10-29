@@ -6,7 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.executors.asyncio import AsyncIOExecutor
 
-from app.jobs import movie_discovery_job, change_tracking_job, category_refresh_job
+from app.jobs import movie_discovery_job, change_tracking_job
 from app.core.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,6 @@ class JobScheduler:
         self._job_ids = {
             "movie_discovery_job",
             "change_tracking_job",
-            "category_refresh_job",
         }
         self._create_scheduler()
 
@@ -82,18 +81,6 @@ class JobScheduler:
                 replace_existing=True,
             )
             logger.info(f"Configured Change Tracking Job - runs daily at {change_hour:02d}:{change_minute:02d} UTC")
-
-            # Job 3: Category Refresh Job - Configurable daily time
-            refresh_hour = settings.JOBS.category_refresh_hour
-            refresh_minute = settings.JOBS.category_refresh_minute
-            self.scheduler.add_job(
-                func=category_refresh_job.run,
-                trigger=CronTrigger(hour=refresh_hour, minute=refresh_minute),
-                id="category_refresh_job",
-                name="Category Refresh Job",
-                replace_existing=True,
-            )
-            logger.info(f"Configured Category Refresh Job - runs daily at {refresh_hour:02d}:{refresh_minute:02d} UTC")
 
             self._jobs_configured = True
             logger.info("All jobs configured successfully")
@@ -175,8 +162,6 @@ class JobScheduler:
                     await movie_discovery_job.run()
                 elif job_id == "change_tracking_job":
                     await change_tracking_job.run()
-                elif job_id == "category_refresh_job":
-                    await category_refresh_job.run()
                 else:
                     return False
 
