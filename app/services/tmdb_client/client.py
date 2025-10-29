@@ -77,10 +77,21 @@ class TMDBClient:
 
     # DISCOVERY & TRENDING ENDPOINTS
 
-    async def get_trending_movies(self, page: int = 1) -> MovieListResponse:
+    async def get_trending_movies_day(self, page: int = 1) -> MovieListResponse:
+        """Get movies trending today."""
+        params = self._build_params(page=page, language="en-US")
+        response = await self.client.get("/trending/movie/day", params=params)
+        return self._transform_list_response(response)
+
+    async def get_trending_movies_week(self, page: int = 1) -> MovieListResponse:
+        """Get movies trending this week."""
         params = self._build_params(page=page, language="en-US")
         response = await self.client.get("/trending/movie/week", params=params)
         return self._transform_list_response(response)
+
+    async def get_trending_movies(self, page: int = 1) -> MovieListResponse:
+        """Get trending movies (default to week)."""
+        return await self.get_trending_movies_week(page)
 
     async def get_popular_movies(self, page: int = 1) -> MovieListResponse:
         params = self._build_params(page=page, language="en-US")

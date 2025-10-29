@@ -4,7 +4,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class JobSettings(BaseModel):
     movie_items_per_run: int = 20
-    movie_items_per_category: int = 20
     tracking_items_per_page: int = 100
     error_rate_threshold: float = 0.9
     
@@ -12,8 +11,6 @@ class JobSettings(BaseModel):
     movie_discovery_interval_minutes: int = 2
     change_tracking_hour: int = 2  # Daily at 2:00 AM UTC
     change_tracking_minute: int = 0
-    category_refresh_hour: int = 5  # Daily at 5:00 AM UTC
-    category_refresh_minute: int = 0
 
 
 class Settings(BaseSettings):

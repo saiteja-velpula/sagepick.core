@@ -7,7 +7,7 @@ from app.core.db import get_session
 from app.core.redis import redis_client
 from app.core.job_execution import job_execution_manager
 from app.core.settings import settings
-from app.services.tmdb_client.client import TMDBClient
+from app.core.tmdb import get_tmdb_client
 from app.services.tmdb_client.models import MovieSearchParams
 from app.crud import job_status, job_log, movie_discovery_state
 from app.models import JobType
@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 class MovieDiscoveryJob:
     def __init__(self):
         self.job_type = JobType.MOVIE_DISCOVERY
-        self.tmdb_client = None
         self.current_page = 1
         self.config = settings.JOBS
 
@@ -59,12 +58,12 @@ class MovieDiscoveryJob:
                     db_session
                 )
 
-                # Initialize TMDB client
-                self.tmdb_client = TMDBClient()
+                # Get shared TMDB client
+                tmdb_client = await get_tmdb_client()
 
                 # Fetch and process movies
                 batch_result = await self._discover_movies(
-                    db_session, job_id, cancel_event
+                    db_session, job_id, tmdb_client, cancel_event
                 )
 
                 await job_log.log_info(
@@ -156,11 +155,9 @@ class MovieDiscoveryJob:
             finally:
                 if job_id is not None:
                     await job_execution_manager.unregister(job_id)
-                if self.tmdb_client:
-                    await self.tmdb_client.close()
 
     async def _discover_movies(
-        self, db: AsyncSession, job_id: int, cancel_event: Optional[asyncio.Event]
+        self, db: AsyncSession, job_id: int, tmdb_client, cancel_event: Optional[asyncio.Event]
     ) -> BatchProcessResult:
         """Discover movies from TMDB discover endpoint."""
         try:
@@ -179,10 +176,10 @@ class MovieDiscoveryJob:
 
             # Create search params for discovery
             search_params = MovieSearchParams(
-                page=self.current_page, sort_by="title.asc"
+                page=self.current_page, sort_by="primary_release_date.desc", include_adult=True
             )
 
-            discover_response = await self.tmdb_client.discover_movies(search_params)
+            discover_response = await tmdb_client.discover_movies(search_params)
 
             if not discover_response or not discover_response.movies:
                 await job_log.log_warning(
@@ -210,7 +207,7 @@ class MovieDiscoveryJob:
             if movie_ids:
                 batch_result = await process_movie_batch(
                     db,
-                    self.tmdb_client,
+                    tmdb_client,
                     movie_ids,
                     job_id,
                     use_locks=True,

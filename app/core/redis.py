@@ -1,5 +1,5 @@
 import redis.asyncio as redis
-from typing import Dict, Optional
+from typing import Optional, List
 import logging
 
 from app.core.settings import settings
@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class RedisClient:
-    """Redis client used for distributed movie-lock coordination."""
+    """Redis client wrapper for async operations."""
 
     def __init__(self):
         self.redis: Optional[redis.Redis] = None
@@ -39,7 +39,59 @@ class RedisClient:
             await self.redis.close()
             self._initialized = False
             logger.info("Redis connection closed")
+            
+    # Common Methods
+    async def get(self, key: str) -> Optional[str]:
+        """Get a value from Redis."""
+        if not self.redis:
+            return None
+        try:
+            return await self.redis.get(key)
+        except Exception as exc:
+            logger.error(f"Failed to get Redis key {key}: {exc}")
+            return None
 
+    async def setex(self, key: str, ttl: int, value: str) -> None:
+        """Set a key with expiration time."""
+        if not self.redis:
+            return
+        try:
+            await self.redis.setex(key, ttl, value)
+        except Exception as exc:
+            logger.error(f"Failed to setex Redis key {key}: {exc}")
+
+    async def keys(self, pattern: str) -> List[str]:
+        """Get keys matching a pattern."""
+        if not self.redis:
+            return []
+        try:
+            return await self.redis.keys(pattern)
+        except Exception as exc:
+            logger.error(f"Failed to get Redis keys for pattern {pattern}: {exc}")
+            return []
+
+    async def delete(self, *keys: str) -> int:
+        """Delete one or more keys."""
+        if not self.redis or not keys:
+            return 0
+        try:
+            return await self.redis.delete(*keys)
+        except Exception as exc:
+            logger.error(f"Failed to delete Redis keys {keys}: {exc}")
+            return 0
+        
+    # Utility methods
+    async def health_check(self) -> bool:
+        """Check if Redis is healthy."""
+        try:
+            if self.redis:
+                await self.redis.ping()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Redis health check failed: {e}")
+            return False
+        
     # Movie ID Locking for conflict resolution
     async def acquire_movie_lock(self, movie_id: int, timeout: int = 300) -> bool:
         """
@@ -83,39 +135,6 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Failed to extend movie lock for {movie_id}: {e}")
             return False
-
-    # Utility methods
-    async def health_check(self) -> bool:
-        """Check if Redis is healthy."""
-        try:
-            if self.redis:
-                await self.redis.ping()
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Redis health check failed: {e}")
-            return False
-
-    async def hgetall(self, key: str) -> Dict[str, str]:
-        """Fetch a Redis hash and return it as a plain dict."""
-        if not self.redis:
-            return {}
-        try:
-            return await self.redis.hgetall(key)
-        except Exception as exc:
-            logger.error("Failed to read Redis hash %s: %s", key, exc)
-            return {}
-
-    async def hset(self, key: str, field: int | str, value: int | str) -> None:
-        """Set a field on a Redis hash, swallowing connection failures."""
-        if not self.redis:
-            return
-        try:
-            await self.redis.hset(key, field, value)
-        except Exception as exc:
-            logger.error(
-                "Failed to persist Redis hash %s field %s: %s", key, field, exc
-            )
 
 
 # Global Redis client instance

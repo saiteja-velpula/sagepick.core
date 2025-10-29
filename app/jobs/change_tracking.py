@@ -7,7 +7,7 @@ from app.core.db import get_session
 from app.core.redis import redis_client
 from app.core.job_execution import job_execution_manager
 from app.core.settings import settings
-from app.services.tmdb_client.client import TMDBClient
+from app.core.tmdb import get_tmdb_client
 from app.crud import job_status, job_log
 from app.models.job_status import JobType
 from app.utils.movie_processor import BatchProcessResult, process_movie_batch
@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 class ChangeTrackingJob:
     def __init__(self):
         self.job_type = JobType.CHANGE_TRACKING
-        self.tmdb_client = None
         self.config = settings.JOBS
 
     async def run(self):
@@ -50,12 +49,12 @@ class ChangeTrackingJob:
                 # Initialize Redis client
                 await redis_client.initialize()
 
-                # Initialize TMDB client
-                self.tmdb_client = TMDBClient()
+                # Get shared TMDB client
+                tmdb_client = await get_tmdb_client()
 
                 # Track changes and process movies
                 batch_result = await self._track_changes(
-                    db_session, job_id, cancel_event
+                    db_session, job_id, tmdb_client, cancel_event
                 )
 
                 await job_log.log_info(
@@ -139,11 +138,9 @@ class ChangeTrackingJob:
             finally:
                 if job_id is not None:
                     await job_execution_manager.unregister(job_id)
-                if self.tmdb_client:
-                    await self.tmdb_client.close()
 
     async def _track_changes(
-        self, db: AsyncSession, job_id: int, cancel_event: Optional[asyncio.Event]
+        self, db: AsyncSession, job_id: int, tmdb_client, cancel_event: Optional[asyncio.Event]
     ) -> BatchProcessResult:
         """Track changes from TMDB changes endpoint."""
         try:
@@ -168,7 +165,7 @@ class ChangeTrackingJob:
                 )
 
                 # Fetch changes from TMDB
-                changes_response = await self.tmdb_client.get_movie_changes(
+                changes_response = await tmdb_client.get_movie_changes(
                     page=current_page
                 )
 
@@ -203,7 +200,7 @@ class ChangeTrackingJob:
                 if movie_ids:
                     batch_result = await process_movie_batch(
                         db,
-                        self.tmdb_client,
+                        tmdb_client,
                         movie_ids,
                         job_id,
                         use_locks=True,
