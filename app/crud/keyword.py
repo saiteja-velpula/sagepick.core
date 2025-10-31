@@ -1,6 +1,7 @@
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert
 
 from app.crud.base import CRUDBase
 from app.models.keyword import Keyword
@@ -28,7 +29,6 @@ class CRUDKeyword(CRUDBase[Keyword, Keyword, Keyword]):
         commit: bool = True,
         flush: bool = True,
     ) -> Keyword:
-        # Check if keyword exists by tmdb_id
         existing_keyword = await self.get_by_tmdb_id(db, keyword_id)
 
         if existing_keyword:
@@ -51,7 +51,7 @@ class CRUDKeyword(CRUDBase[Keyword, Keyword, Keyword]):
     async def upsert_keywords_batch(
         self,
         db: AsyncSession,
-        keyword_data: List[Dict[str, any]],  # [{"tmdb_id": 1, "name": "superhero"}, ...]
+        keyword_data: List[Dict[str, Any]],  # [{"tmdb_id": 1, "name": "superhero"}, ...]
         commit: bool = True,
         flush: bool = True,
     ) -> Dict[int, int]:
@@ -63,39 +63,38 @@ class CRUDKeyword(CRUDBase[Keyword, Keyword, Keyword]):
             return {}
 
         tmdb_ids = [item["tmdb_id"] for item in keyword_data]
+
+        # Use PostgreSQL native UPSERT with ON CONFLICT DO UPDATE
+        stmt = insert(Keyword.__table__).values(keyword_data)
         
-        # Get existing keywords in batch
-        existing_keywords = await self.get_by_tmdb_ids(db, tmdb_ids)
+        # ON CONFLICT: when tmdb_id conflicts, only update if name has changed
+        stmt = stmt.on_conflict_do_update(
+            index_elements=['tmdb_id'],
+            set_={
+                'name': stmt.excluded.name
+            },
+            where=(Keyword.__table__.c.name != stmt.excluded.name)
+        )
         
-        result_mapping = {}
+        # Return the IDs using RETURNING clause
+        stmt = stmt.returning(Keyword.__table__.c.tmdb_id, Keyword.__table__.c.id)
         
-        # Process each keyword
-        for item in keyword_data:
-            tmdb_id = item["tmdb_id"]
-            name = item["name"]
-            
-            if tmdb_id in existing_keywords:
-                # Update existing
-                existing_keyword = existing_keywords[tmdb_id]
-                existing_keyword.name = name
-                db.add(existing_keyword)
-            else:
-                # Create new
-                new_keyword = Keyword(tmdb_id=tmdb_id, name=name)
-                db.add(new_keyword)
+        # Execute the UPSERT
+        result = await db.execute(stmt)
+        rows = result.fetchall()
+        mapping = {row[0]: row[1] for row in rows}  # tmdb_id -> id
+
+        missing_ids = [tmdb_id for tmdb_id in tmdb_ids if tmdb_id not in mapping]
+        if missing_ids:
+            existing = await self.get_by_tmdb_ids(db, missing_ids)
+            mapping.update({tmdb_id: keyword_obj.id for tmdb_id, keyword_obj in existing.items()})
 
         if commit:
             await db.commit()
-            # Re-fetch to get all IDs
-            final_keywords = await self.get_by_tmdb_ids(db, tmdb_ids)
-            result_mapping = {tmdb_id: keyword.id for tmdb_id, keyword in final_keywords.items()}
         elif flush:
             await db.flush()
-            # Get IDs after flush
-            final_keywords = await self.get_by_tmdb_ids(db, tmdb_ids)
-            result_mapping = {tmdb_id: keyword.id for tmdb_id, keyword in final_keywords.items()}
 
-        return result_mapping
+        return mapping
 
 
 # Singleton instance

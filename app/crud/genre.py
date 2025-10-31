@@ -1,6 +1,7 @@
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert
 
 from app.crud.base import CRUDBase
 from app.models.genre import Genre
@@ -51,7 +52,7 @@ class CRUDGenre(CRUDBase[Genre, Genre, Genre]):
     async def upsert_genres_batch(
         self,
         db: AsyncSession,
-        genre_data: List[Dict[str, any]],  # [{"tmdb_id": 1, "name": "Action"}, ...]
+    genre_data: List[Dict[str, Any]],  # [{"tmdb_id": 1, "name": "Action"}, ...]
         commit: bool = True,
         flush: bool = True,
     ) -> Dict[int, int]:
@@ -63,40 +64,39 @@ class CRUDGenre(CRUDBase[Genre, Genre, Genre]):
             return {}
 
         tmdb_ids = [item["tmdb_id"] for item in genre_data]
+
+        # Use PostgreSQL native UPSERT with ON CONFLICT DO UPDATE
+        stmt = insert(Genre.__table__).values(genre_data)
         
-        # Get existing genres in batch
-        existing_genres = await self.get_by_tmdb_ids(db, tmdb_ids)
+        # ON CONFLICT: when tmdb_id conflicts, only update if name has changed
+        stmt = stmt.on_conflict_do_update(
+            index_elements=['tmdb_id'],  # The unique index on tmdb_id
+            set_={
+                'name': stmt.excluded.name
+            },
+            # Only update when the name is actually different (PostgreSQL-level check)
+            where=(Genre.__table__.c.name != stmt.excluded.name)
+        )
         
-        result_mapping = {}
+        # Return the IDs using RETURNING clause
+        stmt = stmt.returning(Genre.__table__.c.tmdb_id, Genre.__table__.c.id)
         
-        # Process each genre
-        for item in genre_data:
-            tmdb_id = item["tmdb_id"]
-            name = item["name"]
-            
-            if tmdb_id in existing_genres:
-                # Update existing
-                existing_genre = existing_genres[tmdb_id]
-                existing_genre.name = name
-                db.add(existing_genre)
-                # Note: ID will be available after flush
-            else:
-                # Create new
-                new_genre = Genre(tmdb_id=tmdb_id, name=name)
-                db.add(new_genre)
+        # Execute the UPSERT
+        result = await db.execute(stmt)
+        rows = result.fetchall()
+        mapping = {row[0]: row[1] for row in rows}  # tmdb_id -> id
+
+        missing_ids = [tmdb_id for tmdb_id in tmdb_ids if tmdb_id not in mapping]
+        if missing_ids:
+            existing = await self.get_by_tmdb_ids(db, missing_ids)
+            mapping.update({tmdb_id: genre_obj.id for tmdb_id, genre_obj in existing.items()})
 
         if commit:
             await db.commit()
-            # Re-fetch to get all IDs
-            final_genres = await self.get_by_tmdb_ids(db, tmdb_ids)
-            result_mapping = {tmdb_id: genre.id for tmdb_id, genre in final_genres.items()}
         elif flush:
             await db.flush()
-            # Get IDs after flush
-            final_genres = await self.get_by_tmdb_ids(db, tmdb_ids)
-            result_mapping = {tmdb_id: genre.id for tmdb_id, genre in final_genres.items()}
 
-        return result_mapping
+        return mapping
 
 
 # Singleton instance
