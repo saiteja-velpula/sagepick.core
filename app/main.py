@@ -3,10 +3,11 @@ from fastapi import FastAPI
 
 from app.core.scheduler import job_scheduler
 from app.core.redis import redis_client
+from app.core.tmdb import close_tmdb_client
 from app.core.exceptions import register_exception_handlers
 from app.core.middleware import CorrelationIdMiddleware
 from app.core.logging import setup_logging, get_structured_logger
-from app.api import router
+from app.api import api_router
 from app import __version__ as app_version
 
 # Setup structured logging
@@ -38,6 +39,10 @@ async def lifespan(app: FastAPI):
         await job_scheduler.stop()
         logger.info("Job scheduler stopped")
 
+        # Close TMDB client singleton
+        await close_tmdb_client()
+        logger.info("TMDB client closed")
+
         # Close Redis connection
         await redis_client.close()
         logger.info("Redis client closed")
@@ -57,7 +62,7 @@ app.add_middleware(CorrelationIdMiddleware)
 # Register exception handlers
 register_exception_handlers(app)
 
-app.include_router(router)
+app.include_router(api_router)
 
 
 # Root endpoint

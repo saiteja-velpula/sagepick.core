@@ -1,8 +1,4 @@
-"""
-Movies API endpoints for SAGEPICK movie data management.
-"""
-
-from typing import List, Optional
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, func
@@ -11,10 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.db import get_session
 from app.crud.movie import movie as movie_crud
-from app.crud.media_category import media_category as media_category_crud
 from app.models.movie import Movie
-from app.models.media_category import MediaCategory, MediaCategoryRead
-from app.models.media_category_movie import MediaCategoryMovie
 from app.models.genre import Genre
 from app.models.keyword import Keyword
 from app.models.movie_genre import MovieGenre
@@ -35,7 +28,7 @@ router = APIRouter()
 
 
 # Movie Endpoints
-@router.get("/movies", response_model=PaginatedResponse[MovieListItem])
+@router.get("/", response_model=PaginatedResponse[MovieListItem])
 async def get_movies(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
@@ -147,7 +140,7 @@ async def get_movies(
     return PaginatedResponse(data=movie_items, pagination=pagination)
 
 
-@router.get("/movies/{movie_id}", response_model=MovieFullDetail)
+@router.get("/{movie_id}", response_model=MovieFullDetail)
 async def get_movie_by_id(
     movie_id: int,
     db: AsyncSession = Depends(get_session),
@@ -201,7 +194,7 @@ async def get_movie_by_id(
     )
 
 
-@router.get("/movies/tmdb/{tmdb_id}", response_model=MovieFullDetail)
+@router.get("/tmdb/{tmdb_id}", response_model=MovieFullDetail)
 async def get_movie_by_tmdb_id(
     tmdb_id: int,
     db: AsyncSession = Depends(get_session),
@@ -216,120 +209,6 @@ async def get_movie_by_tmdb_id(
 
     # Redirect to get_movie_by_id for consistency
     return await get_movie_by_id(movie_obj.id, db)
-
-
-# Movie Categories Endpoints
-@router.get("/categories", response_model=List[MediaCategoryRead])
-async def get_movie_categories(
-    db: AsyncSession = Depends(get_session), token: dict = Depends(verify_token)
-):
-    """Get all movie categories."""
-    return await media_category_crud.get_all_categories(db)
-
-
-@router.get("/categories/{category_id}", response_model=MediaCategoryRead)
-async def get_movie_category(
-    category_id: int,
-    db: AsyncSession = Depends(get_session),
-    token: dict = Depends(verify_token),
-):
-    """Get a specific movie category."""
-    category = await media_category_crud.get(db, category_id)
-    if not category:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
-        )
-    return category
-
-
-@router.get(
-    "/categories/{category_id}/movies", response_model=PaginatedResponse[MovieListItem]
-)
-async def get_movies_by_category(
-    category_id: int,
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: AsyncSession = Depends(get_session),
-    token: dict = Depends(verify_token),
-):
-    """Get movies in a specific category with pagination."""
-    # Check if category exists
-    category = await media_category_crud.get(db, category_id)
-    if not category:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
-        )
-
-    offset = calculate_offset(page, per_page)
-
-    # Query movies in category
-    movies_query = (
-        select(Movie)
-        .join(MediaCategoryMovie)
-        .where(MediaCategoryMovie.media_category_id == category_id)
-        .order_by(Movie.popularity.desc())
-        .offset(offset)
-        .limit(per_page)
-    )
-
-    # Count total movies in category
-    count_query = (
-        select(func.count(Movie.id))
-        .join(MediaCategoryMovie)
-        .where(MediaCategoryMovie.media_category_id == category_id)
-    )
-
-    # Execute queries
-    movies_result = await db.execute(movies_query)
-    movies = movies_result.scalars().all()
-
-    count_result = await db.execute(count_query)
-    total_items = count_result.scalar()
-
-    # Convert to response format
-    movie_items = [
-        MovieListItem(
-            id=movie.id,
-            tmdb_id=movie.tmdb_id,
-            title=movie.title,
-            overview=movie.overview,
-            backdrop_path=movie.backdrop_path,
-            poster_path=movie.poster_path,
-            adult=movie.adult,
-            popularity=movie.popularity,
-            vote_average=movie.vote_average,
-            release_date=movie.release_date.isoformat() if movie.release_date else None,
-        )
-        for movie in movies
-    ]
-
-    pagination = create_pagination_info(page, per_page, total_items)
-
-    return PaginatedResponse(data=movie_items, pagination=pagination)
-
-
-@router.get(
-    "/categories/name/{category_name}/movies",
-    response_model=PaginatedResponse[MovieListItem],
-)
-async def get_movies_by_category_name(
-    category_name: str,
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: AsyncSession = Depends(get_session),
-    token: dict = Depends(verify_token),
-):
-    """Get movies in a category by category name with pagination."""
-    # Get category by name
-    category = await media_category_crud.get_by_name(db, category_name)
-    if not category:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Category '{category_name}' not found",
-        )
-
-    # Redirect to get_movies_by_category
-    return await get_movies_by_category(category.id, page, per_page, db)
 
 
 # Statistics Endpoints
@@ -353,11 +232,6 @@ async def get_movie_statistics(
     total_keywords_result = await db.execute(total_keywords_query)
     total_keywords = total_keywords_result.scalar()
 
-    # Total categories
-    total_categories_query = select(func.count(MediaCategory.id))
-    total_categories_result = await db.execute(total_categories_query)
-    total_categories = total_categories_result.scalar()
-
     # Movies by adult content
     adult_movies_query = select(func.count(Movie.id)).where(Movie.adult)
     adult_movies_result = await db.execute(adult_movies_query)
@@ -367,7 +241,6 @@ async def get_movie_statistics(
         "total_movies": total_movies,
         "total_genres": total_genres,
         "total_keywords": total_keywords,
-        "total_categories": total_categories,
         "adult_movies": adult_movies,
         "non_adult_movies": total_movies - adult_movies,
     }

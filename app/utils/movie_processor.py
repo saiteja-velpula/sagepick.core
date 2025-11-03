@@ -101,8 +101,8 @@ class MovieProcessor:
                 keyword_ids=keyword_ids,
                 commit=False,
             )
-
-            await db.flush()
+            
+            await db.commit()
             return movie_obj
 
         except Exception as e:
