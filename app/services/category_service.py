@@ -1,5 +1,6 @@
 import json
 import hashlib
+from math import ceil
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import logging
@@ -75,6 +76,9 @@ CATEGORY_CONFIGS = {
 }
 
 
+TMDB_PAGE_SIZE = 20
+
+
 class CategoryService:
     def __init__(self):
         pass  # No need to manage TMDB client instance anymore
@@ -111,6 +115,72 @@ class CategoryService:
             )
         except Exception as e:
             logger.warning(f"Failed to cache data for {cache_key}: {e}")
+
+    async def _get_tmdb_page(
+        self,
+        db: AsyncSession,
+        category: str,
+        tmdb_page: int,
+        config: CategoryConfig,
+        **filters,
+    ) -> Tuple[List[int], Dict[str, Any]]:
+        cache_key = self._get_cache_key(category, tmdb_page, **filters)
+        meta_key = self._get_meta_cache_key(category, **filters)
+
+        cached_ids = await self._get_cached_page(cache_key)
+        if cached_ids is not None:
+            metadata: Dict[str, Any] = {}
+            try:
+                cached_meta = await redis_client.get(meta_key)
+                if cached_meta:
+                    metadata = json.loads(cached_meta)
+            except Exception as e:
+                logger.warning(f"Failed to load cached metadata for {category}: {e}")
+
+            metadata.setdefault("tmdb_total_pages", metadata.get("total_pages"))
+            metadata.setdefault("tmdb_page_size", TMDB_PAGE_SIZE)
+            metadata.setdefault("total_results", len(cached_ids))
+            metadata["tmdb_page"] = tmdb_page
+            return cached_ids, metadata
+
+        logger.info(f"Cache miss for {category} TMDB page {tmdb_page}, fetching from TMDB")
+        tmdb_client = await get_tmdb_client()
+
+        if not hasattr(tmdb_client, config.tmdb_method):
+            raise ValueError(f"TMDB method {config.tmdb_method} not found")
+
+        tmdb_method = getattr(tmdb_client, config.tmdb_method)
+
+        tmdb_response = await tmdb_method(page=tmdb_page, **filters)
+
+        if not tmdb_response or not hasattr(tmdb_response, "movies"):
+            logger.warning(f"No movies found for {category} TMDB page {tmdb_page}")
+            metadata = {
+                "total_results": getattr(tmdb_response, "total_results", 0),
+                "tmdb_total_pages": getattr(tmdb_response, "total_pages", 0),
+                "tmdb_page_size": TMDB_PAGE_SIZE,
+                "tmdb_page": tmdb_page,
+            }
+            await redis_client.setex(meta_key, config.cache_duration, json.dumps(metadata))
+            return [], metadata
+
+        movie_ids = await self._fetch_and_process_movies(
+            db, tmdb_response.movies, category
+        )
+
+        metadata = {
+            "total_results": tmdb_response.pagination.total_results,
+            "tmdb_total_pages": tmdb_response.pagination.total_pages,
+            "tmdb_page_size": TMDB_PAGE_SIZE,
+            "tmdb_page": tmdb_page,
+        }
+        metadata["total_pages"] = metadata["tmdb_total_pages"]
+
+        await self._cache_page(cache_key, movie_ids, config.cache_duration)
+        await redis_client.setex(meta_key, config.cache_duration, json.dumps(metadata))
+
+        logger.info(f"Cached {len(movie_ids)} movie IDs for {category} TMDB page {tmdb_page}")
+        return movie_ids, metadata
     
     async def _fetch_and_process_movies(
         self, 
@@ -176,78 +246,83 @@ class CategoryService:
         return movie_ids
     
     async def get_category_movies(
-        self, 
+        self,
         db: AsyncSession,
-        category: str, 
+        category: str,
         page: int = 1,
-        **filters
+        per_page: int = TMDB_PAGE_SIZE,
+        **filters,
     ) -> Tuple[List[int], Dict[str, Any]]:
-        
+
         if category not in CATEGORY_CONFIGS:
             raise ValueError(f"Unknown category: {category}")
-        
+
         config = CATEGORY_CONFIGS[category]
-        cache_key = self._get_cache_key(category, page, **filters)
-        meta_key = self._get_meta_cache_key(category, **filters)
-        
-        # Try to get from cache first
-        cached_ids = await self._get_cached_page(cache_key)
-        if cached_ids:
-            logger.info(f"Cache hit for {category} page {page}")
-            
-            # Get metadata from cache
+        per_page = max(1, min(per_page, 100))
+
+        start_index = (page - 1) * per_page
+        end_index = start_index + per_page
+
+        tmdb_page_start = start_index // TMDB_PAGE_SIZE + 1
+        tmdb_page_end = max(tmdb_page_start, (end_index - 1) // TMDB_PAGE_SIZE + 1)
+
+        aggregated_ids: List[int] = []
+        total_results: Optional[int] = None
+        tmdb_total_pages: Optional[int] = None
+
+        for tmdb_page in range(tmdb_page_start, tmdb_page_end + 1):
             try:
-                cached_meta = await redis_client.get(meta_key)
-                metadata = json.loads(cached_meta) if cached_meta else {}
-            except:
-                metadata = {}
-            
-            return cached_ids, metadata
-        
-        # Cache miss - fetch from TMDB
-        logger.info(f"Cache miss for {category} page {page}, fetching from TMDB")
-        tmdb_client = await get_tmdb_client()
-        
-        # Get TMDB method
-        if not hasattr(tmdb_client, config.tmdb_method):
-            raise ValueError(f"TMDB method {config.tmdb_method} not found")
-        
-        tmdb_method = getattr(tmdb_client, config.tmdb_method)
-        
-        # Call TMDB API
-        try:
-            tmdb_response = await tmdb_method(page=page, **filters)
-            
-            if not tmdb_response or not hasattr(tmdb_response, 'movies'):
-                logger.warning(f"No movies found for {category} page {page}")
-                return [], {}
-            
-            # Process movies and get our internal IDs
-            movie_ids = await self._fetch_and_process_movies(
-                db, tmdb_response.movies, category
-            )
-            
-            # Prepare metadata
-            metadata = {
-                "total_pages": getattr(tmdb_response, 'total_pages', 1),
-                "total_results": getattr(tmdb_response, 'total_results', len(movie_ids)),
-                "current_page": page
-            }
-            
-            # Cache the results
-            await self._cache_page(cache_key, movie_ids, config.cache_duration)
-            await redis_client.setex(
-                meta_key, 
-                config.cache_duration, 
-                json.dumps(metadata)
-            )
-            
-            logger.info(f"Cached {len(movie_ids)} movie IDs for {category} page {page}")
-            return movie_ids, metadata
-            
-        except Exception as e:
-            logger.error(f"Failed to fetch {category} from TMDB: {e}")
-            raise
+                page_ids, metadata = await self._get_tmdb_page(
+                    db, category, tmdb_page, config, **filters
+                )
+            except Exception as exc:
+                logger.error(f"Failed to fetch {category} TMDB page {tmdb_page}: {exc}")
+                raise
+
+            if total_results is None:
+                total_results = metadata.get("total_results", 0)
+                tmdb_total_pages = metadata.get("tmdb_total_pages")
+                if total_results is not None and start_index >= total_results:
+                    return [], {
+                        "total_results": total_results,
+                        "tmdb_total_pages": tmdb_total_pages or 0,
+                        "tmdb_page_size": TMDB_PAGE_SIZE,
+                    }
+
+            if tmdb_total_pages is not None and tmdb_page > tmdb_total_pages:
+                break
+
+            if not page_ids:
+                break
+
+            page_start_index = (tmdb_page - 1) * TMDB_PAGE_SIZE
+            slice_start = max(start_index - page_start_index, 0)
+            slice_end = max(min(end_index - page_start_index, TMDB_PAGE_SIZE), 0)
+
+            if slice_start < slice_end:
+                aggregated_ids.extend(page_ids[slice_start:slice_end])
+
+            if len(aggregated_ids) >= per_page:
+                break
+
+            if tmdb_total_pages is not None and tmdb_page >= tmdb_total_pages:
+                break
+
+        aggregated_ids = aggregated_ids[:per_page]
+
+        if total_results is None:
+            total_results = len(aggregated_ids)
+
+        total_pages = ceil(total_results / per_page) if total_results else 0
+
+        response_metadata = {
+            "total_results": total_results,
+            "total_pages": total_pages,
+            "tmdb_total_pages": tmdb_total_pages,
+            "tmdb_page_size": TMDB_PAGE_SIZE,
+        }
+
+        return aggregated_ids, response_metadata
     
     async def get_available_categories(self) -> List[Dict[str, str]]:
         """Get list of available categories."""

@@ -160,8 +160,8 @@ async def process_movie_batch(
                 )
             break
 
-        result.attempted += 1
         lock_acquired = True
+        lock_error = False
 
         # Acquire lock if needed
         if use_locks:
@@ -170,17 +170,26 @@ async def process_movie_batch(
             except Exception as e:
                 logger.error(f"Failed to acquire lock for movie {movie_id}: {e}")
                 lock_acquired = False
+                lock_error = True
 
         if not lock_acquired:
-            result.failed += 1
-            result.skipped_locked += 1
-            if job_id:
-                await job_log.log_info(
-                    db, job_id, f"Skipped movie {movie_id} due to existing lock"
-                )
+            if lock_error:
+                result.attempted += 1
+                result.failed += 1
+                if job_id:
+                    await job_log.log_error(
+                        db, job_id, f"Unable to obtain processing lock for movie {movie_id}"
+                    )
+            else:
+                result.skipped_locked += 1
+                if job_id:
+                    await job_log.log_info(
+                        db, job_id, f"Skipped movie {movie_id} due to existing lock"
+                    )
             continue
 
         try:
+            result.attempted += 1
             # Process the movie
             processed_movie = await movie_processor.process_movie(
                 db, tmdb_client, movie_id, job_id

@@ -16,6 +16,8 @@ from app.utils.pagination import (
 )
 from sqlmodel import select
 
+TMDB_PAGE_SIZE = 20
+
 router = APIRouter()
 
 
@@ -54,13 +56,16 @@ async def get_category_movies(
         movie_ids, metadata = await category_service.get_category_movies(
             db=db,
             category=category_name,
-            page=page
+            page=page,
+            per_page=per_page,
         )
-        
+
+        total_results = metadata.get("total_results", len(movie_ids))
+
         if not movie_ids:
             return PaginatedResponse(
                 data=[],
-                pagination=create_pagination_info(page, per_page, 0)
+                pagination=create_pagination_info(page, per_page, total_results),
             )
         
         # Get movie details from our database
@@ -82,11 +87,10 @@ async def get_category_movies(
             )
             for movie in movies
         ]
-        
+
         # Use metadata from category service for pagination
-        total_results = metadata.get('total_results', len(movie_items))
         pagination = create_pagination_info(page, per_page, total_results)
-        
+
         return PaginatedResponse(
             data=movie_items,
             pagination=pagination
@@ -133,9 +137,9 @@ async def discover_movies(
     This is the power-user endpoint for complex movie queries.
     """
     try:
-        # Build search parameters
+        per_page = max(1, min(per_page, 100))
+
         search_params = MovieSearchParams(
-            page=page,
             with_genres=with_genres,
             without_genres=without_genres,
             with_keywords=with_keywords,
@@ -151,57 +155,84 @@ async def discover_movies(
             with_runtime_gte=with_runtime_gte,
             with_runtime_lte=with_runtime_lte,
             include_adult=include_adult,
-            sort_by=sort_by
+            sort_by=sort_by,
         )
-        
-        # Use TMDB client directly for discover
+
         tmdb_client = await get_tmdb_client()
-        discover_response = await tmdb_client.discover_movies(search_params)
-        
-        if not discover_response or not discover_response.movies:
-            return PaginatedResponse(
-                data=[],
-                pagination=create_pagination_info(page, per_page, 0)
-            )
-        
-        # Extract TMDB IDs
-        tmdb_ids = [movie.tmdb_id for movie in discover_response.movies]
-        
-        # Check which movies we have in our DB
+
+        start_index = (page - 1) * per_page
+        end_index = start_index + per_page
+        tmdb_page_start = start_index // TMDB_PAGE_SIZE + 1
+        tmdb_page_end = max(tmdb_page_start, (end_index - 1) // TMDB_PAGE_SIZE + 1)
+
+        aggregated_movies = []
+        total_results = 0
+        tmdb_total_pages = None
+
+        for tmdb_page in range(tmdb_page_start, tmdb_page_end + 1):
+            params_with_page = search_params.model_copy(update={"page": tmdb_page})
+            discover_response = await tmdb_client.discover_movies(params_with_page)
+
+            if not discover_response:
+                break
+
+            if tmdb_total_pages is None:
+                tmdb_total_pages = discover_response.pagination.total_pages
+                total_results = discover_response.pagination.total_results
+                if start_index >= total_results:
+                    pagination = create_pagination_info(page, per_page, total_results)
+                    return PaginatedResponse(data=[], pagination=pagination)
+
+            aggregated_movies.extend(discover_response.movies or [])
+
+            if tmdb_total_pages is not None and tmdb_page >= tmdb_total_pages:
+                break
+
+        if not aggregated_movies:
+            pagination = create_pagination_info(page, per_page, total_results)
+            return PaginatedResponse(data=[], pagination=pagination)
+
+        relative_start = start_index - (tmdb_page_start - 1) * TMDB_PAGE_SIZE
+        relative_start = max(relative_start, 0)
+        relative_end = relative_start + per_page
+        selected_movies = aggregated_movies[relative_start:relative_end]
+
+        tmdb_ids = [movie.tmdb_id for movie in selected_movies]
+
+        if not tmdb_ids:
+            pagination = create_pagination_info(page, per_page, total_results)
+            return PaginatedResponse(data=[], pagination=pagination)
+
         existing_movies = await movie_crud.get_by_tmdb_ids(db, tmdb_ids)
         existing_tmdb_ids = {movie.tmdb_id: movie for movie in existing_movies}
-        
-        # Fetch missing movies from TMDB
+
         missing_tmdb_ids = [
-            tmdb_id for tmdb_id in tmdb_ids 
-            if tmdb_id not in existing_tmdb_ids
+            tmdb_id for tmdb_id in tmdb_ids if tmdb_id not in existing_tmdb_ids
         ]
-        
+
         if missing_tmdb_ids:
             from app.utils.movie_processor import process_movie_batch
+
             await process_movie_batch(
                 db=db,
                 tmdb_client=tmdb_client,
                 movie_ids=missing_tmdb_ids,
                 job_id=None,
                 use_locks=False,
-                cancel_event=None
+                cancel_event=None,
             )
-            
-            # Re-fetch to get newly created movies
+
             all_movies = await movie_crud.get_by_tmdb_ids(db, tmdb_ids)
         else:
             all_movies = existing_movies
-        
-        # Maintain original order from TMDB
-        ordered_movies = []
+
         movie_by_tmdb_id = {movie.tmdb_id: movie for movie in all_movies}
-        
-        for tmdb_id in tmdb_ids:
-            if tmdb_id in movie_by_tmdb_id:
-                ordered_movies.append(movie_by_tmdb_id[tmdb_id])
-        
-        # Convert to response format
+        ordered_movies = [
+            movie_by_tmdb_id[tmdb_id]
+            for tmdb_id in tmdb_ids
+            if tmdb_id in movie_by_tmdb_id
+        ]
+
         movie_items = [
             MovieListItem(
                 id=movie.id,
@@ -213,20 +244,17 @@ async def discover_movies(
                 adult=movie.adult,
                 popularity=movie.popularity,
                 vote_average=movie.vote_average,
-                release_date=movie.release_date.isoformat() if movie.release_date else None,
+                release_date=movie.release_date.isoformat()
+                if movie.release_date
+                else None,
             )
             for movie in ordered_movies
         ]
-        
-        # Use TMDB pagination info
-        total_results = discover_response.pagination.total_results
+
         pagination = create_pagination_info(page, per_page, total_results)
-        
-        return PaginatedResponse(
-            data=movie_items,
-            pagination=pagination
-        )
-            
+
+        return PaginatedResponse(data=movie_items, pagination=pagination)
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -245,52 +273,85 @@ async def search_movies(
 ):
     """Search movies by title or overview text."""
     try:
+        per_page = max(1, min(per_page, 100))
+
         tmdb_client = await get_tmdb_client()
-        search_response = await tmdb_client.search_movies(
-            query=query,
-            page=page
-        )
-        
-        if not search_response or not search_response.movies:
-            return PaginatedResponse(
-                data=[],
-                pagination=create_pagination_info(page, per_page, 0)
+
+        start_index = (page - 1) * per_page
+        end_index = start_index + per_page
+        tmdb_page_start = start_index // TMDB_PAGE_SIZE + 1
+        tmdb_page_end = max(tmdb_page_start, (end_index - 1) // TMDB_PAGE_SIZE + 1)
+
+        aggregated_movies = []
+        total_results = 0
+        tmdb_total_pages = None
+
+        for tmdb_page in range(tmdb_page_start, tmdb_page_end + 1):
+            search_response = await tmdb_client.search_movies(
+                query=query,
+                page=tmdb_page,
             )
-        
-        # Process similar to discover endpoint
-        tmdb_ids = [movie.tmdb_id for movie in search_response.movies]
-        
+
+            if not search_response:
+                break
+
+            if tmdb_total_pages is None:
+                tmdb_total_pages = search_response.pagination.total_pages
+                total_results = search_response.pagination.total_results
+                if start_index >= total_results:
+                    pagination = create_pagination_info(page, per_page, total_results)
+                    return PaginatedResponse(data=[], pagination=pagination)
+
+            aggregated_movies.extend(search_response.movies or [])
+
+            if tmdb_total_pages is not None and tmdb_page >= tmdb_total_pages:
+                break
+
+        if not aggregated_movies:
+            pagination = create_pagination_info(page, per_page, total_results)
+            return PaginatedResponse(data=[], pagination=pagination)
+
+        relative_start = start_index - (tmdb_page_start - 1) * TMDB_PAGE_SIZE
+        relative_start = max(relative_start, 0)
+        relative_end = relative_start + per_page
+        selected_movies = aggregated_movies[relative_start:relative_end]
+
+        tmdb_ids = [movie.tmdb_id for movie in selected_movies]
+
+        if not tmdb_ids:
+            pagination = create_pagination_info(page, per_page, total_results)
+            return PaginatedResponse(data=[], pagination=pagination)
+
         existing_movies = await movie_crud.get_by_tmdb_ids(db, tmdb_ids)
         existing_tmdb_ids = {movie.tmdb_id: movie for movie in existing_movies}
-        
+
         missing_tmdb_ids = [
-            tmdb_id for tmdb_id in tmdb_ids 
-            if tmdb_id not in existing_tmdb_ids
+            tmdb_id for tmdb_id in tmdb_ids if tmdb_id not in existing_tmdb_ids
         ]
-        
+
         if missing_tmdb_ids:
             from app.utils.movie_processor import process_movie_batch
+
             await process_movie_batch(
                 db=db,
                 tmdb_client=tmdb_client,
                 movie_ids=missing_tmdb_ids,
                 job_id=None,
                 use_locks=False,
-                cancel_event=None
+                cancel_event=None,
             )
-            
+
             all_movies = await movie_crud.get_by_tmdb_ids(db, tmdb_ids)
         else:
             all_movies = existing_movies
-        
-        # Maintain search result order
-        ordered_movies = []
+
         movie_by_tmdb_id = {movie.tmdb_id: movie for movie in all_movies}
-        
-        for tmdb_id in tmdb_ids:
-            if tmdb_id in movie_by_tmdb_id:
-                ordered_movies.append(movie_by_tmdb_id[tmdb_id])
-        
+        ordered_movies = [
+            movie_by_tmdb_id[tmdb_id]
+            for tmdb_id in tmdb_ids
+            if tmdb_id in movie_by_tmdb_id
+        ]
+
         movie_items = [
             MovieListItem(
                 id=movie.id,
@@ -302,19 +363,17 @@ async def search_movies(
                 adult=movie.adult,
                 popularity=movie.popularity,
                 vote_average=movie.vote_average,
-                release_date=movie.release_date.isoformat() if movie.release_date else None,
+                release_date=movie.release_date.isoformat()
+                if movie.release_date
+                else None,
             )
             for movie in ordered_movies
         ]
-        
-        total_results = search_response.pagination.total_results
+
         pagination = create_pagination_info(page, per_page, total_results)
-        
-        return PaginatedResponse(
-            data=movie_items,
-            pagination=pagination
-        )
-            
+
+        return PaginatedResponse(data=movie_items, pagination=pagination)
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

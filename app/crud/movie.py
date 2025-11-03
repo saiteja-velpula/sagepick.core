@@ -248,9 +248,14 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         self, db: AsyncSession, ids: List[int]
     ) -> List[Movie]:
         """Get multiple movies by their internal IDs."""
-        statement = select(Movie).where(Movie.id.in_(ids))
+        if not ids:
+            return []
+
+        statement = select(Movie).where(Movie.id.in_(set(ids)))
         result = await db.execute(statement)
-        return result.scalars().all()
+        movies = result.scalars().all()
+        movie_map = {movie.id: movie for movie in movies}
+        return [movie_map[mid] for mid in ids if mid in movie_map]
 
 
 # Singleton instance

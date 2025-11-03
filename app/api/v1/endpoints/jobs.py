@@ -32,7 +32,6 @@ async def trigger_job_manually(job_id: str, token: dict = Depends(verify_token))
     valid_job_ids = [
         "movie_discovery_job",
         "change_tracking_job",
-        "category_refresh_job",
     ]
 
     if job_id not in valid_job_ids:
