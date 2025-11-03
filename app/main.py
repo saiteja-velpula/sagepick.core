@@ -7,6 +7,7 @@ from app.core.tmdb import close_tmdb_client
 from app.core.exceptions import register_exception_handlers
 from app.core.middleware import CorrelationIdMiddleware
 from app.core.logging import setup_logging, get_structured_logger
+from app.utils.helpers import preload_genres
 from app.api import api_router
 from app import __version__ as app_version
 
@@ -28,6 +29,11 @@ async def lifespan(app: FastAPI):
         # Start job scheduler
         await job_scheduler.start()
         logger.info("Job scheduler started")
+        
+        # Preload genres into the database and cache
+        from app.core.db import async_session
+        async with async_session() as db:
+            await preload_genres(db)
 
         yield
 
