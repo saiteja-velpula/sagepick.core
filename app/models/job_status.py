@@ -7,6 +7,7 @@ from sqlmodel import SQLModel, Field
 class JobType(str, Enum):
     MOVIE_DISCOVERY = "movie_discovery"
     CHANGE_TRACKING = "change_tracking"
+    DATASET_EXPORT = "dataset_export"
 
 
 class JobExecutionStatus(str, Enum):

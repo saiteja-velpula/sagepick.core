@@ -6,7 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.executors.asyncio import AsyncIOExecutor
 
-from app.jobs import movie_discovery_job, change_tracking_job
+from app.jobs import movie_discovery_job, change_tracking_job, dataset_export_job
 from app.core.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -16,10 +16,7 @@ class JobScheduler:
     """Manages all scheduled jobs for SAGEPICK."""
 
     def __init__(self):
-        self._job_ids = {
-            "movie_discovery_job",
-            "change_tracking_job",
-        }
+        self._job_ids = set()
         self._create_scheduler()
 
     def _create_scheduler(self):
@@ -53,6 +50,13 @@ class JobScheduler:
             )
 
         try:
+            self._job_ids = {
+                "movie_discovery_job",
+                "change_tracking_job",
+            }
+            if settings.DATASET_EXPORT.enabled:
+                self._job_ids.add("dataset_export_job")
+
             # Job 1: Movie Discovery Job - Configurable interval
             next_run_time = datetime.utcnow()
             delay_minutes = settings.MOVIE_DISCOVERY_START_DELAY_MINUTES
@@ -81,6 +85,29 @@ class JobScheduler:
                 replace_existing=True,
             )
             logger.info(f"Configured Change Tracking Job - runs daily at {change_hour:02d}:{change_minute:02d} UTC")
+
+            # Job 3: Dataset Export Job - Weekly schedule
+            dataset_config = settings.DATASET_EXPORT
+            if dataset_config.enabled:
+                self.scheduler.add_job(
+                    func=dataset_export_job.run,
+                    trigger=CronTrigger(
+                        day_of_week=dataset_config.schedule_day_of_week,
+                        hour=dataset_config.schedule_hour,
+                        minute=dataset_config.schedule_minute,
+                    ),
+                    id="dataset_export_job",
+                    name="Dataset Export Job",
+                    replace_existing=True,
+                )
+                logger.info(
+                    "Configured Dataset Export Job - runs %s at %02d:%02d UTC",
+                    dataset_config.schedule_day_of_week,
+                    dataset_config.schedule_hour,
+                    dataset_config.schedule_minute,
+                )
+            else:
+                logger.info("Dataset Export Job disabled in configuration")
 
             self._jobs_configured = True
             logger.info("All jobs configured successfully")
@@ -162,6 +189,8 @@ class JobScheduler:
                     await movie_discovery_job.run()
                 elif job_id == "change_tracking_job":
                     await change_tracking_job.run()
+                elif job_id == "dataset_export_job":
+                    await dataset_export_job.run()
                 else:
                     return False
 

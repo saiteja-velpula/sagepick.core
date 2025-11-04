@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -13,6 +15,31 @@ class JobSettings(BaseModel):
     change_tracking_minute: int = 0
 
 
+class DatasetExportSettings(BaseModel):
+    enabled: bool = False
+    bucket: Optional[str] = "sagepick-datasets"
+    prefix: str = "datasets/movie_items"
+    file_name: str = "movie_items.csv"
+    endpoint_url: Optional[str] = "https://storage.sagepick.in"
+    access_key: Optional[str] = None
+    secret_key: Optional[str] = None
+    region_name: Optional[str] = "ap-south-1"
+    use_ssl: bool = True
+    schedule_day_of_week: str = "sat"
+    schedule_hour: int = 2
+    schedule_minute: int = 0
+
+    @field_validator("schedule_day_of_week")
+    @classmethod
+    def validate_schedule_day(cls, value: str) -> str:
+        if value == "*":
+            return value
+        allowed = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+        if value.lower() not in allowed:
+            raise ValueError("schedule_day_of_week must be one of mon-sun or '*'")
+        return value.lower()
+
+
 class Settings(BaseSettings):
     DATABASE_URL: str
     SECRET_KEY: str
@@ -23,8 +50,13 @@ class Settings(BaseSettings):
     TMDB_MAX_REQUESTS_PER_SECOND: int = 15
     TMDB_KEYWORD_CACHE_MAX_ENTRIES: int = 500_000
     JOBS: JobSettings = JobSettings()
+    DATASET_EXPORT: DatasetExportSettings = DatasetExportSettings()
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+    )
 
     @field_validator('DATABASE_URL')
     def validate_database_url(cls, v):

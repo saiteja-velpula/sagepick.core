@@ -31,6 +31,14 @@ class CRUDJobLog(CRUDBase[JobLog, JobLogCreate, JobLogCreate]):
         )
         return await self.create(db, obj_in=log_create)
 
+    async def log_success(
+        self, db: AsyncSession, job_status_id: int, message: str
+    ) -> JobLog:
+        log_create = JobLogCreate(
+            job_status_id=job_status_id, level=LogLevel.SUCCESS, message=message
+        )
+        return await self.create(db, obj_in=log_create)
+
     async def get_logs_by_job_id(
         self, db: AsyncSession, job_status_id: int
     ) -> List[JobLog]:
