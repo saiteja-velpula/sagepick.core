@@ -2,7 +2,7 @@ import types
 
 import pytest
 
-from app.utils import movie_processor
+from app.utils.movie_processor import MovieProcessor
 
 
 @pytest.mark.asyncio
@@ -37,36 +37,54 @@ async def test_process_movie_success(monkeypatch):
     async def fake_movie_keywords(movie_id):
         return keywords_response
 
-    async def fake_upsert_genre(db, genre_id, name, commit, flush):
-        obj = types.SimpleNamespace(id=1)
-        return obj
+    async def fake_process_genres(db, genres, job_id):
+        return [1]
 
-    async def fake_upsert_keyword(db, keyword_id, name, commit, flush):
-        obj = types.SimpleNamespace(id=2)
-        return obj
+    async def fake_process_keywords(db, keywords, job_id):
+        return [2]
 
     async def fake_upsert_movie(db, movie_create, genre_ids, keyword_ids, commit):
         return types.SimpleNamespace(id=3)
+
+    async def fake_flush():
+        return None
 
     class DummySession:
         async def flush(self):
             return None
 
-    # Patch the TMDB client calls
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+    # Create TMDB client mock
     tmdb_client = types.SimpleNamespace(
         get_movie_by_id=fake_movie_by_id,
         get_movie_keywords=fake_movie_keywords,
     )
 
-    # Patch the CRUD operations
-    monkeypatch.setattr(movie_processor.genre, "upsert_genre", fake_upsert_genre)
-    monkeypatch.setattr(movie_processor.keyword, "upsert_keyword", fake_upsert_keyword)
+    # Create MovieProcessor instance
+    processor = MovieProcessor()
+
+    # Patch the genre and keyword processors
     monkeypatch.setattr(
-        movie_processor.movie, "upsert_movie_with_relationships", fake_upsert_movie
+        processor.genre_processor, "process_genres", fake_process_genres
+    )
+    monkeypatch.setattr(
+        processor.keyword_processor, "process_keywords", fake_process_keywords
     )
 
-    # Test the new MovieProcessor.process_movie method
-    result = await movie_processor.movie_processor.process_movie(
+    # Patch the CRUD operations
+    from app.crud import movie as movie_crud
+
+    monkeypatch.setattr(
+        movie_crud, "upsert_movie_with_relationships", fake_upsert_movie
+    )
+
+    # Test the MovieProcessor.process_movie method
+    result = await processor.process_movie(
         DummySession(),
         tmdb_client,
         movie_id=1,

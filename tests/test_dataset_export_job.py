@@ -1,7 +1,7 @@
 import os
 from datetime import date, datetime
 
-os.environ.setdefault("DATABASE_URL", "secret_url")  # pragma: allowlist secret
+os.environ.setdefault("DATABASE_URL", "postgresql://")  # pragma: allowlist secret
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("SECRET_ISS", "sagepick")
 os.environ.setdefault("TMDB_BEARER_TOKEN", "token")
