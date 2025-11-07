@@ -1,5 +1,7 @@
-from typing import Optional, List, TYPE_CHECKING
-from sqlmodel import SQLModel, Field, Relationship
+from typing import TYPE_CHECKING
+
+from sqlmodel import Field, Relationship, SQLModel
+
 from .movie_keyword import MovieKeyword
 
 if TYPE_CHECKING:
@@ -13,10 +15,10 @@ class KeywordBase(SQLModel):
 
 class Keyword(KeywordBase, table=True):
     __tablename__ = "keywords"
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
 
     # Many-to-many relationship with movies
-    movies: List["Movie"] = Relationship(
+    movies: list["Movie"] = Relationship(
         back_populates="keywords", link_model=MovieKeyword
     )
 

@@ -1,10 +1,14 @@
 import logging
-from typing import Sequence
+from typing import TYPE_CHECKING
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tmdb import get_tmdb_client
 from app.crud.genre import genre as genre_crud
 from app.utils.cache.genre_cache import genre_cache
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +25,12 @@ async def preload_genres(db: AsyncSession) -> None:
             return
 
         payload: Sequence[dict[str, int | str]] = [
-            {"tmdb_id": genre.id, "name": genre.name}
-            for genre in genres
+            {"tmdb_id": genre.id, "name": genre.name} for genre in genres
         ]
 
-        mapping = await genre_crud.upsert_genres_batch(db, payload, commit=True, flush=False)
+        mapping = await genre_crud.upsert_genres_batch(
+            db, payload, commit=True, flush=False
+        )
         logger.info("Preloaded %d genres from TMDB", len(mapping))
 
         # Warm the in-memory cache with the latest values

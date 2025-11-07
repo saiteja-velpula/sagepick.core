@@ -1,6 +1,6 @@
-import redis.asyncio as redis
-from typing import Optional, List
 import logging
+
+import redis.asyncio as redis
 
 from app.core.settings import settings
 
@@ -11,7 +11,7 @@ class RedisClient:
     """Redis client wrapper for async operations."""
 
     def __init__(self):
-        self.redis: Optional[redis.Redis] = None
+        self.redis: redis.Redis | None = None
         self._initialized = False
 
     async def initialize(self):
@@ -39,9 +39,9 @@ class RedisClient:
             await self.redis.close()
             self._initialized = False
             logger.info("Redis connection closed")
-            
+
     # Common Methods
-    async def get(self, key: str) -> Optional[str]:
+    async def get(self, key: str) -> str | None:
         """Get a value from Redis."""
         if not self.redis:
             return None
@@ -60,7 +60,7 @@ class RedisClient:
         except Exception as exc:
             logger.error(f"Failed to setex Redis key {key}: {exc}")
 
-    async def keys(self, pattern: str) -> List[str]:
+    async def keys(self, pattern: str) -> list[str]:
         """Get keys matching a pattern."""
         if not self.redis:
             return []
@@ -79,7 +79,7 @@ class RedisClient:
         except Exception as exc:
             logger.error(f"Failed to delete Redis keys {keys}: {exc}")
             return 0
-        
+
     # Utility methods
     async def health_check(self) -> bool:
         """Check if Redis is healthy."""
@@ -91,11 +91,10 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Redis health check failed: {e}")
             return False
-        
+
     # Movie ID Locking for conflict resolution
     async def acquire_movie_lock(self, movie_id: int, timeout: int = 300) -> bool:
-        """
-        Acquire lock for a movie ID to prevent concurrent processing.
+        """Acquire lock for a movie ID to prevent concurrent processing.
         Returns True if lock acquired, False otherwise.
         """
         if not self.redis:

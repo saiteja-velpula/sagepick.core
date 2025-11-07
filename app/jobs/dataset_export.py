@@ -1,9 +1,8 @@
 import asyncio
 import logging
-import os
-from datetime import datetime
+from datetime import UTC, datetime
+from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,11 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.core.job_execution import job_execution_manager
 from app.core.settings import settings
-from app.crud import job_status, job_log
-from app.services.storage.dataset_builder import DatasetCSVBuilder
-from app.services.storage.dataset_writer import S3DatasetWriter, UploadResult
+from app.crud import job_log, job_status
 from app.models.job_status import JobType
 from app.models.movie import Movie
+from app.services.storage.dataset_builder import DatasetCSVBuilder
+from app.services.storage.dataset_writer import S3DatasetWriter, UploadResult
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +26,9 @@ class DatasetExportJob:
         self.dataset_builder = DatasetCSVBuilder()
 
     async def run(self) -> None:
-        job_id: Optional[int] = None
-        cancel_event: Optional[asyncio.Event] = None
-        temp_file_path: Optional[str] = None
+        job_id: int | None = None
+        cancel_event: asyncio.Event | None = None
+        temp_file_path: str | None = None
         processed_rows = 0
 
         async for db_session in get_session():
@@ -40,7 +39,9 @@ class DatasetExportJob:
                     db_session, job_type=self.job_type, total_items=0
                 )
                 job_id = job_status_record.id
-                cancel_event = await job_execution_manager.register(job_id, self.job_type)
+                cancel_event = await job_execution_manager.register(
+                    job_id, self.job_type
+                )
 
                 await job_log.log_info(
                     db_session,
@@ -64,7 +65,9 @@ class DatasetExportJob:
                     f"Exporting {total_movies} movies to CSV",
                 )
 
-                with NamedTemporaryFile("w", newline="", delete=False, encoding="utf-8") as tmp_file:
+                with NamedTemporaryFile(
+                    "w", newline="", delete=False, encoding="utf-8"
+                ) as tmp_file:
                     temp_file_path = tmp_file.name
 
                 processed_rows = await self.dataset_builder.write_movie_items(
@@ -74,7 +77,7 @@ class DatasetExportJob:
                 if cancel_event and cancel_event.is_set():
                     raise asyncio.CancelledError()
 
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(UTC)
                 object_key = self._build_object_key(timestamp)
 
                 writer = S3DatasetWriter(
@@ -92,14 +95,17 @@ class DatasetExportJob:
                     temp_file_path, object_key
                 )
 
-                latest_result: Optional[UploadResult] = None
+                latest_result: UploadResult | None = None
                 try:
                     latest_result = await writer.copy_to_latest(object_key)
                 except Exception:
                     await job_log.log_warning(
                         db_session,
                         job_id,
-                        "Failed to update latest object; dated snapshot uploaded successfully",
+                        (
+                            "Failed to update latest object; "
+                            "dated snapshot uploaded successfully"
+                        ),
                     )
 
                 await job_status.complete_job(
@@ -147,7 +153,7 @@ class DatasetExportJob:
                     )
                     await job_status.cancel_job(db_session, job_id)
                 break
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.error("Dataset export job failed: %s", exc, exc_info=True)
                 if job_id is not None:
                     await job_log.log_error(
@@ -161,11 +167,16 @@ class DatasetExportJob:
             finally:
                 if job_id is not None:
                     await job_execution_manager.unregister(job_id)
-                if temp_file_path and os.path.exists(temp_file_path):
-                    try:
-                        os.remove(temp_file_path)
-                    except OSError:
-                        logger.warning("Unable to delete temporary export file %s", temp_file_path)
+                if temp_file_path:
+                    temp_path = Path(temp_file_path)
+                    if temp_path.exists():
+                        try:
+                            temp_path.unlink()
+                        except OSError:
+                            logger.warning(
+                                "Unable to delete temporary export file %s",
+                                temp_file_path,
+                            )
 
     def _validate_configuration(self) -> None:
         if not self.config.enabled:
@@ -201,13 +212,12 @@ class DatasetExportJob:
         self,
         processed_rows: int,
         object_key: str,
-        version_id: Optional[str],
-        latest_key: Optional[str],
-        latest_version_id: Optional[str],
+        version_id: str | None,
+        latest_key: str | None,
+        latest_version_id: str | None,
     ) -> str:
-        message = (
-            f"Exported {processed_rows} movie records to {self.config.bucket}/{object_key}"
-        )
+        bucket_key = f"{self.config.bucket}/{object_key}"
+        message = f"Exported {processed_rows} movie records to {bucket_key}"
         if version_id:
             message += f" (version {version_id})"
         if latest_key:

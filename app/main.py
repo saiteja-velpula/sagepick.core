@@ -1,15 +1,17 @@
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-from app.core.scheduler import job_scheduler
-from app.core.redis import redis_client
-from app.core.tmdb import close_tmdb_client
-from app.core.exceptions import register_exception_handlers
-from app.core.middleware import CorrelationIdMiddleware
-from app.core.logging import setup_logging, get_structured_logger
-from app.utils.helpers import preload_genres
-from app.api import api_router
 from app import __version__ as app_version
+from app.api import api_router
+from app.core.db import async_session
+from app.core.exceptions import register_exception_handlers
+from app.core.logging import get_structured_logger, setup_logging
+from app.core.middleware import CorrelationIdMiddleware
+from app.core.redis import redis_client
+from app.core.scheduler import job_scheduler
+from app.core.tmdb import close_tmdb_client
+from app.utils.helpers import preload_genres
 
 # Setup structured logging
 setup_logging(use_json=False, correlation_id_in_format=True)
@@ -17,7 +19,7 @@ logger = get_structured_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     # Startup
     logger.info("Starting SAGEPICK Core application...")
 
@@ -29,9 +31,8 @@ async def lifespan(app: FastAPI):
         # Start job scheduler
         await job_scheduler.start()
         logger.info("Job scheduler started")
-        
+
         # Preload genres into the database and cache
-        from app.core.db import async_session
         async with async_session() as db:
             await preload_genres(db)
 
@@ -77,7 +78,9 @@ def read_root():
     return {
         "name": "Sagepick Core Backend!",
         "version": app_version,
-        "description": "Movie recommendation system with automated TMDB data synchronization",
+        "description": (
+            "Movie recommendation system with automated " "TMDB data synchronization"
+        ),
     }
 
 

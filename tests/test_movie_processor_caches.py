@@ -2,7 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.utils.movie_processor import _GenreCache, _KeywordCache, redis_client
+from app.core.redis import redis_client
+from app.utils.cache.genre_cache import GenreCache
+from app.utils.cache.keyword_cache import KeywordCache
 
 
 class _FakeResult:
@@ -25,7 +27,7 @@ class _FakeSession:
 
 @pytest.mark.asyncio
 async def test_genre_cache_loads_once(monkeypatch):
-    cache = _GenreCache()
+    cache = GenreCache()
     rows = [(1, 11), (2, 22)]
     fake_session = _FakeSession(rows)
 
@@ -37,12 +39,12 @@ async def test_genre_cache_loads_once(monkeypatch):
     assert data_second is data_first
     assert fake_session.calls == 1
 
-    cache.set(3, 33)
+    await cache.set(fake_session, 3, 33)
     assert data_second[3] == 33
 
 
 async def _build_keyword_cache(monkeypatch, initial_map, redis_available=True):
-    cache = _KeywordCache()
+    cache = KeywordCache()
 
     monkeypatch.setattr(redis_client, "redis", None)
 

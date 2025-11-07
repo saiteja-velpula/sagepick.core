@@ -1,13 +1,14 @@
 import logging
-from datetime import datetime, timedelta
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.jobstores.memory import MemoryJobStore
-from apscheduler.executors.asyncio import AsyncIOExecutor
+from datetime import UTC, datetime, timedelta
 
-from app.jobs import movie_discovery_job, change_tracking_job, dataset_export_job
+from apscheduler.executors.asyncio import AsyncIOExecutor
+from apscheduler.jobstores.memory import MemoryJobStore
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
 from app.core.settings import settings
+from app.jobs import change_tracking_job, dataset_export_job, movie_discovery_job
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +59,10 @@ class JobScheduler:
                 self._job_ids.add("dataset_export_job")
 
             # Job 1: Movie Discovery Job - Configurable interval
-            next_run_time = datetime.utcnow()
+            next_run_time = datetime.now(UTC)
             delay_minutes = settings.MOVIE_DISCOVERY_START_DELAY_MINUTES
             if delay_minutes > 0:
-                next_run_time = datetime.utcnow() + timedelta(minutes=delay_minutes)
+                next_run_time = datetime.now(UTC) + timedelta(minutes=delay_minutes)
 
             discovery_interval = settings.JOBS.movie_discovery_interval_minutes
             self.scheduler.add_job(
@@ -72,7 +73,10 @@ class JobScheduler:
                 replace_existing=True,
                 next_run_time=next_run_time,
             )
-            logger.info(f"Configured Movie Discovery Job - runs every {discovery_interval} minutes")
+            logger.info(
+                "Configured Movie Discovery Job - runs every %d minutes",
+                discovery_interval,
+            )
 
             # Job 2: Change Tracking Job - Configurable daily time
             change_hour = settings.JOBS.change_tracking_hour
@@ -84,7 +88,11 @@ class JobScheduler:
                 name="Change Tracking Job",
                 replace_existing=True,
             )
-            logger.info(f"Configured Change Tracking Job - runs daily at {change_hour:02d}:{change_minute:02d} UTC")
+            logger.info(
+                "Configured Change Tracking Job - runs daily at %02d:%02d UTC",
+                change_hour,
+                change_minute,
+            )
 
             # Job 3: Dataset Export Job - Weekly schedule
             dataset_config = settings.DATASET_EXPORT
@@ -113,7 +121,7 @@ class JobScheduler:
             logger.info("All jobs configured successfully")
 
         except Exception as e:
-            logger.error(f"Failed to configure jobs: {str(e)}")
+            logger.error(f"Failed to configure jobs: {e!s}")
             raise
 
     async def start(self):
@@ -133,7 +141,7 @@ class JobScheduler:
                 logger.info(f"Job '{job.name}' next run: {job.next_run_time}")
 
         except Exception as e:
-            logger.error(f"Failed to start scheduler: {str(e)}")
+            logger.error(f"Failed to start scheduler: {e!s}")
             raise
 
     async def stop(self):
@@ -145,7 +153,7 @@ class JobScheduler:
             else:
                 logger.info("Job scheduler already stopped")
         except Exception as e:
-            logger.error(f"Failed to stop scheduler: {str(e)}")
+            logger.error(f"Failed to stop scheduler: {e!s}")
             raise
         finally:
             # Reset the scheduler so a subsequent start creates fresh jobs
@@ -200,7 +208,7 @@ class JobScheduler:
                 logger.error(f"Job not found: {job_id}")
                 return False
         except Exception as e:
-            logger.error(f"Failed to trigger job {job_id}: {str(e)}")
+            logger.error(f"Failed to trigger job {job_id}: {e!s}")
             return False
 
     def pause_job(self, job_id: str) -> bool:
@@ -210,7 +218,7 @@ class JobScheduler:
             logger.info(f"Paused job: {job_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to pause job {job_id}: {str(e)}")
+            logger.error(f"Failed to pause job {job_id}: {e!s}")
             return False
 
     def resume_job(self, job_id: str) -> bool:
@@ -220,7 +228,7 @@ class JobScheduler:
             logger.info(f"Resumed job: {job_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to resume job {job_id}: {str(e)}")
+            logger.error(f"Failed to resume job {job_id}: {e!s}")
             return False
 
     @property

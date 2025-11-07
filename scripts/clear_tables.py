@@ -1,15 +1,14 @@
 import asyncio
 import logging
-from typing import List
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlmodel import SQLModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from app.core.db import engine, close_db
 import app.models  # noqa: F401
+from app.core.db import close_db, engine
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -17,14 +16,14 @@ logging.basicConfig(
 logger = logging.getLogger("clear_tables")
 
 
-def _collect_table_names() -> List[str]:
+def _collect_table_names() -> list[str]:
     tables = [table.name for table in SQLModel.metadata.sorted_tables]
     if not tables:
         logger.warning("No tables found in metadata. Did you import your models?")
     return tables
 
 
-async def truncate_tables(table_names: List[str]) -> None:
+async def truncate_tables(table_names: list[str]) -> None:
     if not table_names:
         return
 

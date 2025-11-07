@@ -1,27 +1,26 @@
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select, func
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlmodel import func, select
 
+from app.api.deps import verify_token
 from app.core.db import get_session
 from app.crud.movie import movie as movie_crud
-from app.models.movie import Movie
-from app.models.genre import Genre
-from app.models.keyword import Keyword
-from app.models.movie_genre import MovieGenre
-from app.api.deps import verify_token
 from app.models.api_models import (
-    MovieListItem,
-    MovieFullDetail,
     GenreDict,
     KeywordDict,
+    MovieFullDetail,
+    MovieListItem,
 )
+from app.models.genre import Genre
+from app.models.keyword import Keyword
+from app.models.movie import Movie
+from app.models.movie_genre import MovieGenre
 from app.utils.pagination import (
     PaginatedResponse,
-    create_pagination_info,
     calculate_offset,
+    create_pagination_info,
 )
 
 router = APIRouter()
@@ -32,17 +31,17 @@ router = APIRouter()
 async def get_movies(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    search: Optional[str] = Query(None, description="Search in title or overview"),
-    genre: Optional[str] = Query(
+    search: str | None = Query(None, description="Search in title or overview"),
+    genre: str | None = Query(
         None, description="Filter by genre name (comma-separated for multiple)"
     ),
-    exclude_genre: Optional[str] = Query(
+    exclude_genre: str | None = Query(
         None, description="Exclude movies matching this genre name (comma-separated)"
     ),
-    min_popularity: Optional[float] = Query(
+    min_popularity: float | None = Query(
         None, ge=0, description="Minimum popularity score"
     ),
-    adult: Optional[bool] = Query(None, description="Filter by adult content"),
+    adult: bool | None = Query(None, description="Filter by adult content"),
     db: AsyncSession = Depends(get_session),
     token: dict = Depends(verify_token),
 ):
@@ -150,23 +149,22 @@ async def get_movie_by_id(
     # Use eager loading to fetch movie with relationships in a single query
     query = (
         select(Movie)
-        .options(
-            selectinload(Movie.genres),
-            selectinload(Movie.keywords)
-        )
+        .options(selectinload(Movie.genres), selectinload(Movie.keywords))
         .where(Movie.id == movie_id)
     )
-    
+
     result = await db.execute(query)
     movie_obj = result.scalar_one_or_none()
-    
+
     if not movie_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Movie not found"
         )
 
     # Convert to response format using eager-loaded relationships
-    genres_dict = [GenreDict(id=genre.id, name=genre.name) for genre in movie_obj.genres]
+    genres_dict = [
+        GenreDict(id=genre.id, name=genre.name) for genre in movie_obj.genres
+    ]
     keywords_dict = [
         KeywordDict(id=keyword.id, name=keyword.name) for keyword in movie_obj.keywords
     ]

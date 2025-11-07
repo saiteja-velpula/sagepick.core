@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from pathlib import Path
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class UploadResult:
     bucket: str
     key: str
-    version_id: Optional[str]
+    version_id: str | None
 
 
 class S3DatasetWriter:
@@ -26,7 +26,18 @@ class S3DatasetWriter:
     - Return version ids for traceability
     """
 
-    def __init__(self, *, bucket: str, prefix: str, file_name: str, endpoint_url: Optional[str] = None, access_key: Optional[str] = None, secret_key: Optional[str] = None, region_name: Optional[str] = None, use_ssl: bool = True):
+    def __init__(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        file_name: str,
+        endpoint_url: str | None = None,
+        access_key: str | None = None,
+        secret_key: str | None = None,
+        region_name: str | None = None,
+        use_ssl: bool = True,
+    ):
         self.bucket = bucket
         self.prefix = (prefix or "").strip("/")
         self.file_name = file_name
@@ -74,9 +85,12 @@ class S3DatasetWriter:
 
     async def upload_file(self, source_path: str, key: str) -> UploadResult:
         """Upload file and return UploadResult with VersionId if available."""
+
         def _put():
-            with open(source_path, "rb") as fh:
-                return self.client().put_object(Bucket=self.bucket, Key=key, Body=fh, ContentType="text/csv")
+            with Path(source_path).open("rb") as fh:
+                return self.client().put_object(
+                    Bucket=self.bucket, Key=key, Body=fh, ContentType="text/csv"
+                )
 
         try:
             resp = await asyncio.to_thread(_put)
@@ -88,17 +102,33 @@ class S3DatasetWriter:
             raise
 
     async def copy_to_latest(self, source_key: str) -> UploadResult:
-        """Copy an existing object to the stable latest key. Returns UploadResult of copy target."""
+        """Copy an existing object to the stable latest key.
+
+        Returns UploadResult of copy target.
+        """
         dest = self.latest_key()
 
         def _copy():
-            return self.client().copy_object(Bucket=self.bucket, Key=dest, CopySource={"Bucket": self.bucket, "Key": source_key}, MetadataDirective="COPY")
+            return self.client().copy_object(
+                Bucket=self.bucket,
+                Key=dest,
+                CopySource={"Bucket": self.bucket, "Key": source_key},
+                MetadataDirective="COPY",
+            )
 
         try:
             resp = await asyncio.to_thread(_copy)
             version_id = resp.get("VersionId")
-            logger.debug("Copied %s -> %s/%s (version=%s)", source_key, self.bucket, dest, version_id)
+            logger.debug(
+                "Copied %s -> %s/%s (version=%s)",
+                source_key,
+                self.bucket,
+                dest,
+                version_id,
+            )
             return UploadResult(bucket=self.bucket, key=dest, version_id=version_id)
         except (BotoCoreError, ClientError) as exc:
-            logger.error("Copy to latest failed for %s -> %s: %s", source_key, dest, exc)
+            logger.error(
+                "Copy to latest failed for %s -> %s: %s", source_key, dest, exc
+            )
             raise

@@ -1,8 +1,8 @@
 import asyncio
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -10,10 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.redis import redis_client
-from app.services.tmdb_client.client import TMDBClient
 from app.crud import job_log, job_status, media_category
 from app.models.job_status import JobType
 from app.models.media_category import MediaCategoryBase
+from app.services.tmdb_client.client import TMDBClient
 from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
 # Configure logging
@@ -27,7 +27,7 @@ PAGES_PER_CATEGORY = 50
 API_DELAY = 0.25
 
 
-CATEGORY_CATALOG: Dict[str, Dict[str, str]] = {
+CATEGORY_CATALOG: dict[str, dict[str, str]] = {
     "trending": {
         "name": "Trending",
         "description": "Movies that are currently trending",
@@ -87,8 +87,8 @@ CATEGORY_CATALOG: Dict[str, Dict[str, str]] = {
 
 
 def _enumerate_categories(
-    categories: Dict[str, Dict[str, str]],
-) -> List[Tuple[int, str, Dict[str, str]]]:
+    categories: dict[str, dict[str, str]],
+) -> list[tuple[int, str, dict[str, str]]]:
     return [
         (index, key, meta) for index, (key, meta) in enumerate(categories.items(), 1)
     ]
@@ -96,12 +96,12 @@ def _enumerate_categories(
 
 def _parse_category_tokens(
     tokens: Sequence[str],
-    categories: Dict[str, Dict[str, str]],
-) -> Tuple[List[str], List[str]]:
+    categories: dict[str, dict[str, str]],
+) -> tuple[list[str], list[str]]:
     ordered = list(categories.keys())
     seen = set()
-    selected: List[str] = []
-    invalid: List[str] = []
+    selected: list[str] = []
+    invalid: list[str] = []
 
     def resolve_token(token: str) -> str | None:
         token = token.strip()
@@ -119,7 +119,7 @@ def _parse_category_tokens(
                 return key
         return None
 
-    normalized: List[str] = []
+    normalized: list[str] = []
     for token in tokens:
         normalized.extend(part for part in token.replace(",", " ").split() if part)
 
@@ -135,7 +135,7 @@ def _parse_category_tokens(
     return selected, invalid
 
 
-def _prompt_for_category_selection(categories: Dict[str, Dict[str, str]]) -> List[str]:
+def _prompt_for_category_selection(categories: dict[str, dict[str, str]]) -> list[str]:
     menu = _enumerate_categories(categories)
     print("Available categories to seed:")
     for index, _, meta in menu:
@@ -162,15 +162,15 @@ class DatabaseSeeder:
         self.tmdb_client = None
         self.categories = CATEGORY_CATALOG
         self.selected_keys = self._resolve_selected_keys(selected_keys)
-        self.active_categories: Dict[str, Dict[str, str]] = {
+        self.active_categories: dict[str, dict[str, str]] = {
             key: self.categories[key] for key in self.selected_keys
         }
 
-    def _resolve_selected_keys(self, selected_keys: Sequence[str] | None) -> List[str]:
+    def _resolve_selected_keys(self, selected_keys: Sequence[str] | None) -> list[str]:
         if not selected_keys:
             return list(self.categories.keys())
 
-        resolved: List[str] = []
+        resolved: list[str] = []
         seen = set()
         for token in selected_keys:
             key = token.strip().lower()
@@ -233,7 +233,8 @@ class DatabaseSeeder:
                     job_id,
                     (
                         "Starting database seeding - "
-                        f"{len(self.active_categories)} categories, {PAGES_PER_CATEGORY} pages each"
+                        f"{len(self.active_categories)} categories, "
+                        f"{PAGES_PER_CATEGORY} pages each"
                     ),
                 )
                 await job_log.log_info(
@@ -250,7 +251,7 @@ class DatabaseSeeder:
 
                 # Seed movies for each category (just movies, no associations)
                 overall_result = BatchProcessResult()
-                for category_key, category_info in self.active_categories.items():
+                for _category_key, category_info in self.active_categories.items():
                     category_result = await self._seed_category_movies(
                         db_session,
                         job_id,
@@ -275,7 +276,8 @@ class DatabaseSeeder:
                     (
                         "Seeding completed! "
                         f"{overall_result.succeeded} succeeded, "
-                        f"{overall_result.failed} failed out of {overall_result.attempted} attempted"
+                        f"{overall_result.failed} failed out of "
+                        f"{overall_result.attempted} attempted"
                         + (
                             f" ({overall_result.skipped_locked} skipped due to locks)"
                             if overall_result.skipped_locked
@@ -287,7 +289,8 @@ class DatabaseSeeder:
                 )
 
                 logger.info(
-                    "Database seeding completed! %d movies processed successfully, %d failed%s.",
+                    "Database seeding completed! %d movies processed "
+                    "successfully, %d failed%s.",
                     overall_result.succeeded,
                     overall_result.failed,
                     (
@@ -307,20 +310,20 @@ class DatabaseSeeder:
                         failed_items=overall_result.failed,
                     )
                     await job_log.log_error(
-                        db_session, job_id, f"Seeding failed: {str(e)}"
+                        db_session, job_id, f"Seeding failed: {e!s}"
                     )
-                logger.error(f"Database seeding failed: {str(e)}")
+                logger.error(f"Database seeding failed: {e!s}")
                 raise
             finally:
                 await redis_client.close()
                 if self.tmdb_client:
                     await self.tmdb_client.close()
-                break
+                break  # noqa: B012
 
     async def _create_categories(self, db: AsyncSession, job_id: int):
         await job_log.log_info(db, job_id, "Creating media categories...")
 
-        for category_key, category_info in self.active_categories.items():
+        for _category_key, category_info in self.active_categories.items():
             try:
                 # Check if category already exists
                 existing_category = await media_category.get_by_name(
@@ -329,7 +332,8 @@ class DatabaseSeeder:
 
                 if existing_category:
                     logger.info(
-                        f"Category '{category_info['name']}' already exists, skipping..."
+                        "Category '%s' already exists, skipping...",
+                        category_info["name"],
                     )
                     continue
 
@@ -347,7 +351,7 @@ class DatabaseSeeder:
 
             except Exception as e:
                 error_msg = (
-                    f"Failed to create category '{category_info['name']}': {str(e)}"
+                    f"Failed to create category '{category_info['name']}': {e!s}"
                 )
                 logger.error(error_msg)
                 await job_log.log_error(db, job_id, error_msg)
@@ -425,9 +429,7 @@ class DatabaseSeeder:
                 await asyncio.sleep(API_DELAY)
 
             except Exception as e:
-                error_msg = (
-                    f"Failed to process page {page} for {category_name}: {str(e)}"
-                )
+                error_msg = f"Failed to process page {page} for {category_name}: {e!s}"
                 logger.error(error_msg)
                 await job_log.log_error(db, job_id, error_msg)
                 await db.rollback()
@@ -450,7 +452,7 @@ async def main(selected_category_keys: Sequence[str] | None):
     except KeyboardInterrupt:
         logger.info("Seeding interrupted by user")
     except Exception as e:
-        logger.error(f"Seeding failed: {str(e)}")
+        logger.error(f"Seeding failed: {e!s}")
         sys.exit(1)
 
 

@@ -1,7 +1,8 @@
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from time import monotonic
-from typing import Awaitable, Callable, TypeVar
+from typing import TypeVar
 
 from app.core.settings import settings
 
@@ -27,7 +28,7 @@ class AsyncRateLimiter:
             self._last_acquire = monotonic()
 
 
-async def rate_limited_call(
+async def rate_limited_call[T](
     limiter: AsyncRateLimiter, coro_factory: Callable[[], Awaitable[T]]
 ) -> T:
     """Execute a coroutine with rate limiting."""

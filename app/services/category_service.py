@@ -1,14 +1,16 @@
-import json
 import hashlib
-from math import ceil
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+import json
 import logging
+from dataclasses import dataclass
+from math import ceil
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis import redis_client
 from app.core.tmdb import get_tmdb_client
 from app.crud.movie import movie as movie_crud
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.utils.movie_processor import process_movie_batch
 
 logger = logging.getLogger(__name__)
 
@@ -25,53 +27,53 @@ CATEGORY_CONFIGS = {
     "trending_day": CategoryConfig(
         name="Trending Today",
         tmdb_method="get_trending_movies_day",
-        cache_duration=2 * 60 * 60  # 2 hours
+        cache_duration=2 * 60 * 60,  # 2 hours
     ),
     "trending_week": CategoryConfig(
-        name="Trending This Week", 
+        name="Trending This Week",
         tmdb_method="get_trending_movies_week",
-        cache_duration=12 * 60 * 60  # 12 hours
+        cache_duration=12 * 60 * 60,  # 12 hours
     ),
     "popular": CategoryConfig(
         name="Popular",
         tmdb_method="get_popular_movies",
-        cache_duration=24 * 60 * 60  # 24 hours
+        cache_duration=24 * 60 * 60,  # 24 hours
     ),
     "top_rated": CategoryConfig(
         name="Top Rated",
-        tmdb_method="get_top_rated_movies", 
-        cache_duration=48 * 60 * 60  # 48 hours
+        tmdb_method="get_top_rated_movies",
+        cache_duration=48 * 60 * 60,  # 48 hours
     ),
     "upcoming": CategoryConfig(
         name="Upcoming",
         tmdb_method="get_upcoming_movies",
-        cache_duration=6 * 60 * 60  # 6 hours
+        cache_duration=6 * 60 * 60,  # 6 hours
     ),
     "now_playing": CategoryConfig(
         name="Now Playing",
         tmdb_method="get_now_playing_movies",
-        cache_duration=4 * 60 * 60  # 4 hours
+        cache_duration=4 * 60 * 60,  # 4 hours
     ),
     # Language-based categories
     "bollywood": CategoryConfig(
         name="Bollywood",
         tmdb_method="get_bollywood_movies",
-        cache_duration=24 * 60 * 60
+        cache_duration=24 * 60 * 60,
     ),
     "tollywood": CategoryConfig(
-        name="Tollywood", 
+        name="Tollywood",
         tmdb_method="get_tollywood_movies",
-        cache_duration=24 * 60 * 60
+        cache_duration=24 * 60 * 60,
     ),
     "kollywood": CategoryConfig(
         name="Kollywood",
-        tmdb_method="get_kollywood_movies", 
-        cache_duration=24 * 60 * 60
+        tmdb_method="get_kollywood_movies",
+        cache_duration=24 * 60 * 60,
     ),
     "hollywood": CategoryConfig(
         name="Hollywood",
         tmdb_method="get_hollywood_movies",
-        cache_duration=24 * 60 * 60
+        cache_duration=24 * 60 * 60,
     ),
 }
 
@@ -82,22 +84,26 @@ TMDB_PAGE_SIZE = 20
 class CategoryService:
     def __init__(self):
         pass  # No need to manage TMDB client instance anymore
-    
+
     def _get_cache_key(self, category: str, page: int, **filters) -> str:
         if filters:
             filter_str = json.dumps(filters, sort_keys=True)
-            filter_hash = hashlib.md5(filter_str.encode()).hexdigest()[:8]
+            filter_hash = hashlib.md5(  # nosec B324  # noqa: S324
+                filter_str.encode()
+            ).hexdigest()[:8]
             return f"category:{category}:filtered:{filter_hash}:page:{page}"
         return f"category:{category}:page:{page}"
-    
+
     def _get_meta_cache_key(self, category: str, **filters) -> str:
         if filters:
             filter_str = json.dumps(filters, sort_keys=True)
-            filter_hash = hashlib.md5(filter_str.encode()).hexdigest()[:8]
+            filter_hash = hashlib.md5(  # nosec B324  # noqa: S324
+                filter_str.encode()
+            ).hexdigest()[:8]
             return f"category:{category}:filtered:{filter_hash}:meta"
         return f"category:{category}:meta"
-    
-    async def _get_cached_page(self, cache_key: str) -> Optional[List[int]]:
+
+    async def _get_cached_page(self, cache_key: str) -> list[int] | None:
         try:
             cached_data = await redis_client.get(cache_key)
             if cached_data:
@@ -105,14 +111,10 @@ class CategoryService:
         except Exception as e:
             logger.warning(f"Failed to get cached data for {cache_key}: {e}")
         return None
-    
-    async def _cache_page(self, cache_key: str, movie_ids: List[int], ttl: int):
+
+    async def _cache_page(self, cache_key: str, movie_ids: list[int], ttl: int):
         try:
-            await redis_client.setex(
-                cache_key, 
-                ttl, 
-                json.dumps(movie_ids)
-            )
+            await redis_client.setex(cache_key, ttl, json.dumps(movie_ids))
         except Exception as e:
             logger.warning(f"Failed to cache data for {cache_key}: {e}")
 
@@ -123,13 +125,13 @@ class CategoryService:
         tmdb_page: int,
         config: CategoryConfig,
         **filters,
-    ) -> Tuple[List[int], Dict[str, Any]]:
+    ) -> tuple[list[int], dict[str, Any]]:
         cache_key = self._get_cache_key(category, tmdb_page, **filters)
         meta_key = self._get_meta_cache_key(category, **filters)
 
         cached_ids = await self._get_cached_page(cache_key)
         if cached_ids is not None:
-            metadata: Dict[str, Any] = {}
+            metadata: dict[str, Any] = {}
             try:
                 cached_meta = await redis_client.get(meta_key)
                 if cached_meta:
@@ -143,7 +145,9 @@ class CategoryService:
             metadata["tmdb_page"] = tmdb_page
             return cached_ids, metadata
 
-        logger.info(f"Cache miss for {category} TMDB page {tmdb_page}, fetching from TMDB")
+        logger.info(
+            f"Cache miss for {category} TMDB page {tmdb_page}, fetching from TMDB"
+        )
         tmdb_client = await get_tmdb_client()
 
         if not hasattr(tmdb_client, config.tmdb_method):
@@ -161,7 +165,9 @@ class CategoryService:
                 "tmdb_page_size": TMDB_PAGE_SIZE,
                 "tmdb_page": tmdb_page,
             }
-            await redis_client.setex(meta_key, config.cache_duration, json.dumps(metadata))
+            await redis_client.setex(
+                meta_key, config.cache_duration, json.dumps(metadata)
+            )
             return [], metadata
 
         movie_ids = await self._fetch_and_process_movies(
@@ -179,45 +185,49 @@ class CategoryService:
         await self._cache_page(cache_key, movie_ids, config.cache_duration)
         await redis_client.setex(meta_key, config.cache_duration, json.dumps(metadata))
 
-        logger.info(f"Cached {len(movie_ids)} movie IDs for {category} TMDB page {tmdb_page}")
+        logger.info(
+            f"Cached {len(movie_ids)} movie IDs for {category} TMDB page {tmdb_page}"
+        )
         return movie_ids, metadata
-    
+
     async def _fetch_and_process_movies(
-        self, 
-        db: AsyncSession,
-        tmdb_movies: List[Any],
-        category: str
-    ) -> List[int]:
+        self, db: AsyncSession, tmdb_movies: list[Any], category: str
+    ) -> list[int]:
         movie_ids = []
         tmdb_ids_to_fetch = []
-        
+
         # Extract TMDB IDs from results
-        tmdb_id_list = [movie.tmdb_id for movie in tmdb_movies if hasattr(movie, 'tmdb_id')]
-        
+        tmdb_id_list = [
+            movie.tmdb_id for movie in tmdb_movies if hasattr(movie, "tmdb_id")
+        ]
+
         if not tmdb_id_list:
             logger.warning(f"No valid TMDB IDs found for category {category}")
             return movie_ids
-        
+
         # Check which movies already exist in our DB
         existing_movies = await movie_crud.get_by_tmdb_ids(db, tmdb_id_list)
         existing_tmdb_ids = {movie.tmdb_id: movie.id for movie in existing_movies}
-        
-        logger.info(f"Found {len(existing_movies)}/{len(tmdb_id_list)} movies in DB for {category}")
-        
+
+        logger.info(
+            "Found %d/%d movies in DB for %s",
+            len(existing_movies),
+            len(tmdb_id_list),
+            category,
+        )
+
         # Add existing movie IDs to result
         for tmdb_id in tmdb_id_list:
             if tmdb_id in existing_tmdb_ids:
                 movie_ids.append(existing_tmdb_ids[tmdb_id])
             else:
                 tmdb_ids_to_fetch.append(tmdb_id)
-        
+
         # Fetch missing movies from TMDB and store in DB
         if tmdb_ids_to_fetch:
             logger.info(f"Fetching {len(tmdb_ids_to_fetch)} missing movies from TMDB")
             tmdb_client = await get_tmdb_client()
-            
-            from app.utils.movie_processor import process_movie_batch
-            
+
             # Process missing movies in batch
             batch_result = await process_movie_batch(
                 db=db,
@@ -225,9 +235,9 @@ class CategoryService:
                 movie_ids=tmdb_ids_to_fetch,
                 job_id=None,  # No job tracking for category requests
                 use_locks=False,  # Skip locks for category fetching
-                cancel_event=None
+                cancel_event=None,
             )
-            
+
             # Get the newly created movies and add their IDs
             new_movies = await movie_crud.get_by_tmdb_ids(db, tmdb_ids_to_fetch)
             for movie in new_movies:
@@ -240,11 +250,13 @@ class CategoryService:
                         movie_ids.append(movie.id)
                 except ValueError:
                     movie_ids.append(movie.id)
-            
-            logger.info(f"Successfully processed {batch_result.succeeded} movies for {category}")
-        
+
+            logger.info(
+                f"Successfully processed {batch_result.succeeded} movies for {category}"
+            )
+
         return movie_ids
-    
+
     async def get_category_movies(
         self,
         db: AsyncSession,
@@ -252,8 +264,7 @@ class CategoryService:
         page: int = 1,
         per_page: int = TMDB_PAGE_SIZE,
         **filters,
-    ) -> Tuple[List[int], Dict[str, Any]]:
-
+    ) -> tuple[list[int], dict[str, Any]]:
         if category not in CATEGORY_CONFIGS:
             raise ValueError(f"Unknown category: {category}")
 
@@ -266,9 +277,9 @@ class CategoryService:
         tmdb_page_start = start_index // TMDB_PAGE_SIZE + 1
         tmdb_page_end = max(tmdb_page_start, (end_index - 1) // TMDB_PAGE_SIZE + 1)
 
-        aggregated_ids: List[int] = []
-        total_results: Optional[int] = None
-        tmdb_total_pages: Optional[int] = None
+        aggregated_ids: list[int] = []
+        total_results: int | None = None
+        tmdb_total_pages: int | None = None
 
         for tmdb_page in range(tmdb_page_start, tmdb_page_end + 1):
             try:
@@ -323,17 +334,14 @@ class CategoryService:
         }
 
         return aggregated_ids, response_metadata
-    
-    async def get_available_categories(self) -> List[Dict[str, str]]:
+
+    async def get_available_categories(self) -> list[dict[str, str]]:
         """Get list of available categories."""
         return [
-            {
-                "key": key,
-                "name": config.name
-            }
+            {"key": key, "name": config.name}
             for key, config in CATEGORY_CONFIGS.items()
         ]
-    
+
     async def invalidate_category_cache(self, category: str):
         """Invalidate all cached pages for a category."""
         try:

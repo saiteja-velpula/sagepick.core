@@ -1,6 +1,6 @@
-from typing import List, Optional
-from pydantic import BaseModel, Field, field_validator
 from datetime import date
+
+from pydantic import BaseModel, Field, field_validator
 
 
 # Basic data models
@@ -12,7 +12,7 @@ class Genre(BaseModel):
 class ProductionCompany(BaseModel):
     id: int
     name: str
-    logo_path: Optional[str] = None
+    logo_path: str | None = None
     origin_country: str
 
 
@@ -43,16 +43,16 @@ class MovieItem(BaseModel):
     tmdb_id: int = Field(alias="id")
     title: str
     original_title: str
-    overview: Optional[str] = None  # CAN be null/empty
-    poster_path: Optional[str] = None  # CAN be null
-    backdrop_path: Optional[str] = None  # CAN be null
-    release_date: Optional[date] = None
+    overview: str | None = None  # CAN be null/empty
+    poster_path: str | None = None  # CAN be null
+    backdrop_path: str | None = None  # CAN be null
+    release_date: date | None = None
     original_language: str
     vote_average: float
     vote_count: int
     popularity: float
     adult: bool
-    genre_ids: List[int] = Field(default_factory=list)
+    genre_ids: list[int] = Field(default_factory=list)
 
     @field_validator("release_date", mode="before")
     def parse_release_date(cls, v):
@@ -75,10 +75,10 @@ class MovieDetails(BaseModel):
     tmdb_id: int = Field(alias="id")
     title: str
     original_title: str
-    overview: Optional[str] = None  # CAN be null/empty
-    poster_path: Optional[str] = None  # CAN be null
-    backdrop_path: Optional[str] = None  # CAN be null
-    release_date: Optional[date] = None
+    overview: str | None = None  # CAN be null/empty
+    poster_path: str | None = None  # CAN be null
+    backdrop_path: str | None = None  # CAN be null
+    release_date: date | None = None
     original_language: str
     vote_average: float
     vote_count: int
@@ -86,19 +86,19 @@ class MovieDetails(BaseModel):
     adult: bool
 
     # Additional fields only in detailed response
-    runtime: Optional[int] = None  # Minutes, can be null/0
-    revenue: Optional[int] = None  # Box office, can be 0/null
-    budget: Optional[int] = None  # Production cost, can be 0/null
-    status: Optional[str] = None  # "Released", "In Production", etc.
-    tagline: Optional[str] = None
-    homepage: Optional[str] = None
-    imdb_id: Optional[str] = None
+    runtime: int | None = None  # Minutes, can be null/0
+    revenue: int | None = None  # Box office, can be 0/null
+    budget: int | None = None  # Production cost, can be 0/null
+    status: str | None = None  # "Released", "In Production", etc.
+    tagline: str | None = None
+    homepage: str | None = None
+    imdb_id: str | None = None
 
     # Related objects (full data instead of just IDs)
-    genres: List[Genre] = Field(default_factory=list)
-    production_companies: List[ProductionCompany] = Field(default_factory=list)
-    production_countries: List[ProductionCountry] = Field(default_factory=list)
-    spoken_languages: List[SpokenLanguage] = Field(default_factory=list)
+    genres: list[Genre] = Field(default_factory=list)
+    production_companies: list[ProductionCompany] = Field(default_factory=list)
+    production_countries: list[ProductionCountry] = Field(default_factory=list)
+    spoken_languages: list[SpokenLanguage] = Field(default_factory=list)
 
     @field_validator("release_date", mode="before")
     def parse_release_date(cls, v):
@@ -118,7 +118,7 @@ class MovieDetails(BaseModel):
 
 class MovieChangeItem(BaseModel):
     id: int
-    adult: Optional[bool] = False
+    adult: bool | None = False
 
     @field_validator("adult", mode="before")
     def parse_adult(cls, v):
@@ -130,11 +130,11 @@ class MovieChangeItem(BaseModel):
 # API response wrappers
 class KeywordsResponse(BaseModel):
     id: int
-    keywords: List[Keyword]
+    keywords: list[Keyword]
 
 
 class GenresResponse(BaseModel):
-    genres: List[Genre]
+    genres: list[Genre]
 
 
 # Raw TMDB response models (for internal parsing)
@@ -142,7 +142,7 @@ class TMDBMovieListResponse(BaseModel):
     page: int
     total_pages: int
     total_results: int
-    results: List[MovieItem]
+    results: list[MovieItem]
 
 
 class PaginationInfo(BaseModel):
@@ -152,12 +152,12 @@ class PaginationInfo(BaseModel):
 
 
 class MovieListResponse(BaseModel):
-    movies: List[MovieItem]
+    movies: list[MovieItem]
     pagination: PaginationInfo
 
 
 class MovieChangeResponse(BaseModel):
-    results: List[MovieChangeItem]
+    results: list[MovieChangeItem]
     page: int
     total_pages: int
     total_results: int
@@ -166,33 +166,33 @@ class MovieChangeResponse(BaseModel):
 # Search parameters
 class MovieSearchParams(BaseModel):
     # Basic search
-    query: Optional[str] = None
+    query: str | None = None
     page: int = 1
 
     # Date filters
-    primary_release_year: Optional[int] = None
-    year: Optional[int] = None
+    primary_release_year: int | None = None
+    year: int | None = None
 
     # Rating filters
-    vote_average_gte: Optional[float] = None
-    vote_count_gte: Optional[int] = None
+    vote_average_gte: float | None = None
+    vote_count_gte: int | None = None
 
     # Genre filters (comma-separated IDs)
-    with_genres: Optional[str] = None
-    without_genres: Optional[str] = None
+    with_genres: str | None = None
+    without_genres: str | None = None
 
     # Runtime filters
-    with_runtime_gte: Optional[int] = None
-    with_runtime_lte: Optional[int] = None
+    with_runtime_gte: int | None = None
+    with_runtime_lte: int | None = None
 
     # Origin filters
-    with_origin_country: Optional[str] = None
-    with_original_language: Optional[str] = None
+    with_origin_country: str | None = None
+    with_original_language: str | None = None
 
     # Company/keyword filters
-    with_companies: Optional[str] = None
-    with_keywords: Optional[str] = None
-    without_keywords: Optional[str] = None
+    with_companies: str | None = None
+    with_keywords: str | None = None
+    without_keywords: str | None = None
 
     # Sorting
     sort_by: str = "popularity.desc"

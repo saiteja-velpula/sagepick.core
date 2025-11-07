@@ -1,8 +1,9 @@
 import asyncio
-from typing import Dict, Any, Optional, Set
-import httpx
 import logging
 from dataclasses import dataclass
+from typing import Any
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 class RetryConfig:
     attempts: int = 3
     backoff_ms: int = 250
-    retry_on_status: Set[int] = None
+    retry_on_status: set[int] = None
 
     def __post_init__(self):
         if self.retry_on_status is None:
@@ -22,8 +23,8 @@ class ApiClient:
     def __init__(
         self,
         base_url: str,
-        headers: Optional[Dict[str, str]] = None,
-        retry_config: Optional[RetryConfig] = None,
+        headers: dict[str, str] | None = None,
+        retry_config: RetryConfig | None = None,
         timeout: float = 10.0,
     ):
         self.base_url = base_url.rstrip("/")
@@ -55,10 +56,10 @@ class ApiClient:
         self,
         method: str,
         endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        json_data: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        params: dict[str, Any] | None = None,
+        json_data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         url = f"{self.base_url}{endpoint}"
         request_headers = {**self.default_headers, **(headers or {})}
 
@@ -135,18 +136,18 @@ class ApiClient:
     async def get(
         self,
         endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         return await self._request("GET", endpoint, params=params, headers=headers)
 
     async def post(
         self,
         endpoint: str,
-        json_data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        json_data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         return await self._request(
             "POST", endpoint, params=params, json_data=json_data, headers=headers
         )
@@ -154,10 +155,10 @@ class ApiClient:
     async def put(
         self,
         endpoint: str,
-        json_data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        json_data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         return await self._request(
             "PUT", endpoint, params=params, json_data=json_data, headers=headers
         )
@@ -165,7 +166,7 @@ class ApiClient:
     async def delete(
         self,
         endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         return await self._request("DELETE", endpoint, params=params, headers=headers)

@@ -1,6 +1,5 @@
-from typing import List
-from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from app.crud.base import CRUDBase
 from app.models.job_log import JobLog, JobLogCreate, LogLevel
@@ -41,7 +40,7 @@ class CRUDJobLog(CRUDBase[JobLog, JobLogCreate, JobLogCreate]):
 
     async def get_logs_by_job_id(
         self, db: AsyncSession, job_status_id: int
-    ) -> List[JobLog]:
+    ) -> list[JobLog]:
         statement = (
             select(JobLog)
             .where(JobLog.job_status_id == job_status_id)
@@ -50,12 +49,12 @@ class CRUDJobLog(CRUDBase[JobLog, JobLogCreate, JobLogCreate]):
         result = await db.execute(statement)
         return result.scalars().all()
 
-    async def get_recent_logs(self, db: AsyncSession, limit: int = 100) -> List[JobLog]:
+    async def get_recent_logs(self, db: AsyncSession, limit: int = 100) -> list[JobLog]:
         statement = select(JobLog).order_by(JobLog.created_at.desc()).limit(limit)
         result = await db.execute(statement)
         return result.scalars().all()
 
-    async def get_error_logs(self, db: AsyncSession, limit: int = 50) -> List[JobLog]:
+    async def get_error_logs(self, db: AsyncSession, limit: int = 50) -> list[JobLog]:
         statement = (
             select(JobLog)
             .where(JobLog.level == LogLevel.ERROR)

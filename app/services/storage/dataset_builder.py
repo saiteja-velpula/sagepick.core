@@ -1,8 +1,9 @@
 import asyncio
 import csv
 import logging
+from collections.abc import Mapping
 from datetime import date
-from typing import Mapping, Optional
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,19 +94,33 @@ class DatasetCSVBuilder:
         self,
         db: AsyncSession,
         output_path: str,
-        cancel_event: Optional[asyncio.Event] = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> int:
         processed = 0
-        with open(output_path, "w", newline="", encoding="utf-8") as csv_file:
-            writer = csv.DictWriter(csv_file, fieldnames=self.fieldnames, extrasaction="ignore")
-            writer.writeheader()
 
-            result = await db.stream(MOVIE_EXPORT_QUERY)
-            async for row in result.mappings():
-                if cancel_event and cancel_event.is_set():
-                    raise asyncio.CancelledError()
-                writer.writerow(self._format_row(row))
-                processed += 1
+        def write_header():
+            with Path(output_path).open("w", newline="", encoding="utf-8") as csv_file:
+                writer = csv.DictWriter(
+                    csv_file, fieldnames=self.fieldnames, extrasaction="ignore"
+                )
+                writer.writeheader()
+
+        def write_row(row_data: dict):
+            with Path(output_path).open("a", newline="", encoding="utf-8") as csv_file:
+                writer = csv.DictWriter(
+                    csv_file, fieldnames=self.fieldnames, extrasaction="ignore"
+                )
+                writer.writerow(row_data)
+
+        await asyncio.to_thread(write_header)
+
+        result = await db.stream(MOVIE_EXPORT_QUERY)
+        async for row in result.mappings():
+            if cancel_event and cancel_event.is_set():
+                raise asyncio.CancelledError()
+            formatted_row = self._format_row(row)
+            await asyncio.to_thread(write_row, formatted_row)
+            processed += 1
 
         logger.debug("CSV build complete: wrote %s rows to %s", processed, output_path)
         return processed
@@ -132,11 +147,21 @@ class DatasetCSVBuilder:
             else "",
             "status": row.get("status", ""),
             "adult": bool(row.get("adult", False)),
-            "vote_average": row.get("vote_average") if row.get("vote_average") is not None else "",
-            "vote_count": row.get("vote_count") if row.get("vote_count") is not None else "",
-            "popularity": row.get("popularity") if row.get("popularity") is not None else "",
-            "budget_usd": row.get("budget_usd") if row.get("budget_usd") is not None else "",
-            "revenue_usd": row.get("revenue_usd") if row.get("revenue_usd") is not None else "",
+            "vote_average": row.get("vote_average")
+            if row.get("vote_average") is not None
+            else "",
+            "vote_count": row.get("vote_count")
+            if row.get("vote_count") is not None
+            else "",
+            "popularity": row.get("popularity")
+            if row.get("popularity") is not None
+            else "",
+            "budget_usd": row.get("budget_usd")
+            if row.get("budget_usd") is not None
+            else "",
+            "revenue_usd": row.get("revenue_usd")
+            if row.get("revenue_usd") is not None
+            else "",
             "genres": row.get("genres", ""),
             "genre_ids": row.get("genre_ids", ""),
             "genre_count": row.get("genre_count") or 0,

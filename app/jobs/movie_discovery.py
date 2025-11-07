@@ -1,16 +1,16 @@
 import asyncio
 import logging
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.db import get_session
-from app.core.redis import redis_client
 from app.core.job_execution import job_execution_manager
+from app.core.redis import redis_client
 from app.core.settings import settings
 from app.core.tmdb import get_tmdb_client
-from app.services.tmdb_client.models import MovieSearchParams
-from app.crud import job_status, job_log, movie_discovery_state
+from app.crud import job_log, job_status, movie_discovery_state
 from app.models import JobType
+from app.services.tmdb_client.models import MovieSearchParams
 from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,10 @@ class MovieDiscoveryJob:
                 await job_log.log_info(
                     db_session,
                     job_id,
-                    f"Starting Movie Discovery Job - fetching {self.config.movie_items_per_run} movies",
+                    (
+                        "Starting Movie Discovery Job - fetching "
+                        f"{self.config.movie_items_per_run} movies"
+                    ),
                 )
 
                 # Mark job as running
@@ -72,7 +75,8 @@ class MovieDiscoveryJob:
                     (
                         "Movie discovery summary: "
                         f"{batch_result.succeeded} succeeded, "
-                        f"{batch_result.failed} failed out of {batch_result.attempted} attempts"
+                        f"{batch_result.failed} failed "
+                        f"out of {batch_result.attempted} attempts"
                         + (
                             f" ({batch_result.skipped_locked} skipped due to locks)"
                             if batch_result.skipped_locked
@@ -124,7 +128,10 @@ class MovieDiscoveryJob:
                     )
 
                     logger.info(
-                        "Movie Discovery Job completed successfully. Processed %d movies.",
+                        (
+                            "Movie Discovery Job completed successfully. "
+                            "Processed %d movies."
+                        ),
                         batch_result.succeeded,
                     )
 
@@ -143,11 +150,11 @@ class MovieDiscoveryJob:
                 return
             except Exception as e:
                 await db_session.rollback()
-                logger.error(f"Movie Discovery Job failed: {str(e)}", exc_info=True)
+                logger.error(f"Movie Discovery Job failed: {e!s}", exc_info=True)
 
                 if job_id:
                     await job_log.log_error(
-                        db_session, job_id, f"Job failed with error: {str(e)}"
+                        db_session, job_id, f"Job failed with error: {e!s}"
                     )
                     await job_status.fail_job(db_session, job_id)
 
@@ -157,7 +164,11 @@ class MovieDiscoveryJob:
                     await job_execution_manager.unregister(job_id)
 
     async def _discover_movies(
-        self, db: AsyncSession, job_id: int, tmdb_client, cancel_event: Optional[asyncio.Event]
+        self,
+        db: AsyncSession,
+        job_id: int,
+        tmdb_client,
+        cancel_event: asyncio.Event | None,
     ) -> BatchProcessResult:
         """Discover movies from TMDB discover endpoint."""
         try:
@@ -176,7 +187,9 @@ class MovieDiscoveryJob:
 
             # Create search params for discovery
             search_params = MovieSearchParams(
-                page=self.current_page, sort_by="primary_release_date.desc", include_adult=True
+                page=self.current_page,
+                sort_by="primary_release_date.desc",
+                include_adult=True,
             )
 
             discover_response = await tmdb_client.discover_movies(search_params)
@@ -218,7 +231,10 @@ class MovieDiscoveryJob:
                 await job_log.log_info(
                     db,
                     job_id,
-                    f"Skipped {batch_result.skipped_locked} movies on page {self.current_page} due to existing locks",
+                    (
+                        f"Skipped {batch_result.skipped_locked} movies "
+                        f"on page {self.current_page} due to existing locks"
+                    ),
                 )
 
             # Reset to page 1 if we've reached the end
@@ -231,7 +247,7 @@ class MovieDiscoveryJob:
             return batch_result
 
         except Exception as e:
-            await job_log.log_error(db, job_id, f"Error in _discover_movies: {str(e)}")
+            await job_log.log_error(db, job_id, f"Error in _discover_movies: {e!s}")
             await db.rollback()
             raise
 

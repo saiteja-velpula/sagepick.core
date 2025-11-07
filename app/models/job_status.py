@@ -1,7 +1,7 @@
-from typing import Optional
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
-from sqlmodel import SQLModel, Field
+
+from sqlmodel import Field, SQLModel
 
 
 class JobType(str, Enum):
@@ -23,15 +23,11 @@ class JobStatusBase(SQLModel):
     status: JobExecutionStatus = Field(
         default=JobExecutionStatus.PENDING, description="Current execution status"
     )
-    started_at: Optional[datetime] = Field(
-        default=None, description="Job start timestamp"
-    )
-    completed_at: Optional[datetime] = Field(
+    started_at: datetime | None = Field(default=None, description="Job start timestamp")
+    completed_at: datetime | None = Field(
         default=None, description="Job completion timestamp"
     )
-    total_items: Optional[int] = Field(
-        default=None, description="Total items to process"
-    )
+    total_items: int | None = Field(default=None, description="Total items to process")
     processed_items: int = Field(default=0, description="Items processed so far")
     failed_items: int = Field(default=0, description="Items that failed processing")
 
@@ -39,12 +35,13 @@ class JobStatusBase(SQLModel):
 class JobStatus(JobStatusBase, table=True):
     __tablename__ = "job_status"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Record creation timestamp"
+        default_factory=lambda: datetime.now(UTC),
+        description="Record creation timestamp",
     )
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Record update timestamp"
+        default_factory=lambda: datetime.now(UTC), description="Record update timestamp"
     )
 
 
@@ -53,12 +50,12 @@ class JobStatusCreate(JobStatusBase):
 
 
 class JobStatusUpdate(SQLModel):
-    status: Optional[JobExecutionStatus] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    total_items: Optional[int] = None
-    processed_items: Optional[int] = None
-    failed_items: Optional[int] = None
+    status: JobExecutionStatus | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    total_items: int | None = None
+    processed_items: int | None = None
+    failed_items: int | None = None
 
 
 class JobStatusRead(JobStatusBase):

@@ -1,5 +1,4 @@
-from datetime import datetime
-from typing import Optional
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -10,7 +9,7 @@ from app.models.movie_discovery_state import MovieDiscoveryState
 class MovieDiscoveryStateCRUD:
     """CRUD helper for persisting the movie discovery pagination state."""
 
-    async def get_state(self, db: AsyncSession) -> Optional[MovieDiscoveryState]:
+    async def get_state(self, db: AsyncSession) -> MovieDiscoveryState | None:
         result = await db.execute(select(MovieDiscoveryState).limit(1))
         return result.scalars().first()
 
@@ -27,10 +26,10 @@ class MovieDiscoveryStateCRUD:
         state = await self.get_state(db)
         if state:
             state.current_page = current_page
-            state.updated_at = datetime.utcnow()
+            state.updated_at = datetime.now(UTC)
         else:
             state = MovieDiscoveryState(
-                id=1, current_page=current_page, updated_at=datetime.utcnow()
+                id=1, current_page=current_page, updated_at=datetime.now(UTC)
             )
         db.add(state)
         await db.commit()

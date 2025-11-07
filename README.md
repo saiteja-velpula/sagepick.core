@@ -24,10 +24,13 @@ Environment
 Copy `.env.example` to `.env` (or `.env.local`) and provide the required secrets:
 
 ```
-DATABASE_URL=postgresql://user:password@localhost:5432/sagepick
+
+```
+DATABASE_URL=postgresql://user:password@localhost:5432/sagepick  # pragma: allowlist secret
 REDIS_URL=redis://localhost:6379/0
 SECRET_KEY=<256-bit-secret>
 SECRET_ISS=SAGEPICK_APP
+```
 TMDB_BEARER_TOKEN=<tmdb-token>
 # Optional dataset export configuration (MinIO/S3)
 DATASET_EXPORT__ENABLED=false

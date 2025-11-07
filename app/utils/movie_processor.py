@@ -1,15 +1,14 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.tmdb_client.client import TMDBClient
-from app.crud import movie, job_log, job_status
+from app.crud import job_log, job_status, movie
 from app.models.movie import Movie, MovieCreate
-from app.utils.rate_limiter import tmdb_rate_limiter, rate_limited_call
+from app.services.tmdb_client.client import TMDBClient
 from app.utils.processors import genre_processor, keyword_processor
+from app.utils.rate_limiter import rate_limited_call, tmdb_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +32,9 @@ class MovieProcessor:
         db: AsyncSession,
         tmdb_client: TMDBClient,
         movie_id: int,
-        job_id: Optional[int] = None,
-    ) -> Optional[Movie]:
-        """
-        Process a single movie from TMDB.
+        job_id: int | None = None,
+    ) -> Movie | None:
+        """Process a single movie from TMDB.
 
         Args:
             db: Database session
@@ -101,7 +99,7 @@ class MovieProcessor:
                 keyword_ids=keyword_ids,
                 commit=False,
             )
-            
+
             await db.commit()
             return movie_obj
 
@@ -110,9 +108,9 @@ class MovieProcessor:
 
             if job_id:
                 await job_log.log_error(
-                    db, job_id, f"Error processing movie {movie_id}: {str(e)}"
+                    db, job_id, f"Error processing movie {movie_id}: {e!s}"
                 )
-            logger.error(f"Error processing movie {movie_id}: {str(e)}", exc_info=True)
+            logger.error(f"Error processing movie {movie_id}: {e!s}", exc_info=True)
             return None
 
 
@@ -123,14 +121,13 @@ movie_processor = MovieProcessor()
 async def process_movie_batch(
     db: AsyncSession,
     tmdb_client: TMDBClient,
-    movie_ids: List[int],
-    job_id: Optional[int] = None,
+    movie_ids: list[int],
+    job_id: int | None = None,
     *,
     use_locks: bool = False,
-    cancel_event: Optional[asyncio.Event] = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> BatchProcessResult:
-    """
-    Process multiple movies in batch.
+    """Process multiple movies in batch.
 
     Args:
         db: Database session
@@ -178,7 +175,9 @@ async def process_movie_batch(
                 result.failed += 1
                 if job_id:
                     await job_log.log_error(
-                        db, job_id, f"Unable to obtain processing lock for movie {movie_id}"
+                        db,
+                        job_id,
+                        f"Unable to obtain processing lock for movie {movie_id}",
                     )
             else:
                 result.skipped_locked += 1
@@ -204,10 +203,10 @@ async def process_movie_batch(
             result.failed += 1
             if job_id:
                 await job_log.log_error(
-                    db, job_id, f"Unhandled error processing movie {movie_id}: {str(e)}"
+                    db, job_id, f"Unhandled error processing movie {movie_id}: {e!s}"
                 )
             logger.error(
-                f"Unhandled error processing movie {movie_id}: {str(e)}", exc_info=True
+                f"Unhandled error processing movie {movie_id}: {e!s}", exc_info=True
             )
 
         finally:

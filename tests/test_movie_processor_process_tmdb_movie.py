@@ -6,7 +6,7 @@ from app.utils import movie_processor
 
 
 @pytest.mark.asyncio
-async def test_process_tmdb_movie_success(monkeypatch):
+async def test_process_movie_success(monkeypatch):
     movie_details = types.SimpleNamespace(
         tmdb_id=1,
         title="Movie",
@@ -52,39 +52,25 @@ async def test_process_tmdb_movie_success(monkeypatch):
         async def flush(self):
             return None
 
-    caches = movie_processor._LookupCaches(genres={}, keywords={})
-
-    monkeypatch.setattr(
-        movie_processor, "_rate_limiter", movie_processor._AsyncRateLimiter(100)
-    )
-    monkeypatch.setattr(
-        movie_processor._genre_cache, "set", lambda *args, **kwargs: None
-    )
-
-    async def _noop_keyword_set(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(movie_processor._keyword_cache, "set", _noop_keyword_set)
-
+    # Patch the TMDB client calls
     tmdb_client = types.SimpleNamespace(
         get_movie_by_id=fake_movie_by_id,
         get_movie_keywords=fake_movie_keywords,
     )
 
+    # Patch the CRUD operations
     monkeypatch.setattr(movie_processor.genre, "upsert_genre", fake_upsert_genre)
     monkeypatch.setattr(movie_processor.keyword, "upsert_keyword", fake_upsert_keyword)
     monkeypatch.setattr(
         movie_processor.movie, "upsert_movie_with_relationships", fake_upsert_movie
     )
 
-    result = await movie_processor.process_tmdb_movie(
+    # Test the new MovieProcessor.process_movie method
+    result = await movie_processor.movie_processor.process_movie(
         DummySession(),
         tmdb_client,
         movie_id=1,
-        caches=caches,
         job_id=None,
     )
 
     assert result.id == 3
-    assert caches.genres[101] == 1
-    assert caches.keywords[201] == 2

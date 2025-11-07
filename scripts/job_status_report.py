@@ -2,9 +2,8 @@ import asyncio
 import logging
 import sys
 from collections import Counter
-from datetime import timezone
+from datetime import UTC
 from pathlib import Path
-from typing import List
 
 from sqlmodel import select
 
@@ -20,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger("job_status_report")
 
 
-async def fetch_recent_jobs(limit: int) -> List[JobStatus]:
+async def fetch_recent_jobs(limit: int) -> list[JobStatus]:
     async with async_session() as session:
         result = await session.execute(
             select(JobStatus).order_by(JobStatus.created_at.desc()).limit(limit)
@@ -32,8 +31,8 @@ def _format_timestamp(value) -> str:
     if value is None:
         return "-"
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
 
 
 async def main(limit: int) -> None:
@@ -52,7 +51,8 @@ async def main(limit: int) -> None:
 
         header = (
             f"{'ID':>6}  {'Type':<18}  {'Status':<10}  "
-            f"{'Processed/Total':<18}  {'Failed':>6}  {'Created (UTC)':<20}  {'Updated (UTC)':<20}"
+            f"{'Processed/Total':<18}  {'Failed':>6}  "
+            f"{'Created (UTC)':<20}  {'Updated (UTC)':<20}"
         )
         print(header)
         print("-" * len(header))
@@ -60,9 +60,11 @@ async def main(limit: int) -> None:
             processed = job.processed_items or 0
             total = job.total_items if job.total_items is not None else "-"
             print(
-                f"{job.id:>6}  {job.job_type.value:<18}  {job.status.value:<10}  "
+                f"{job.id:>6}  {job.job_type.value:<18}  "
+                f"{job.status.value:<10}  "
                 f"{processed}/{total:<14}  {job.failed_items or 0:>6}  "
-                f"{_format_timestamp(job.created_at):<20}  {_format_timestamp(job.updated_at):<20}"
+                f"{_format_timestamp(job.created_at):<20}  "
+                f"{_format_timestamp(job.updated_at):<20}"
             )
     finally:
         await close_db()

@@ -29,9 +29,11 @@ async def test_process_movie_batch_aggregates_status(monkeypatch):
     monkeypatch.setattr(movie_processor.job_log, "log_info", fake_log)
     monkeypatch.setattr(movie_processor.job_log, "log_warning", fake_log)
     monkeypatch.setattr(movie_processor.job_log, "log_error", fake_log)
-    monkeypatch.setattr(movie_processor, "process_tmdb_movie", fake_process_tmdb_movie)
-    monkeypatch.setattr(movie_processor._genre_cache, "get_map", fake_get_map)
-    monkeypatch.setattr(movie_processor._keyword_cache, "get_map", fake_get_map)
+    # Patch the MovieProcessor.process_movie method instead of process_tmdb_movie
+    monkeypatch.setattr(
+        "app.utils.movie_processor.movie_processor.process_movie",
+        fake_process_tmdb_movie,
+    )
 
     class DummySession:
         async def flush(self):

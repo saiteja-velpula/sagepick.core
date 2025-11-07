@@ -25,9 +25,9 @@ COPY alembic.ini ./alembic.ini
 COPY scripts ./scripts
 COPY docker/entrypoint.sh ./entrypoint.sh
 
-RUN chmod +x entrypoint.sh
+RUN chmod +x entrypoint.sh && \
+    adduser --system --group --home /app sagepick
 
-RUN adduser --system --group --home /app sagepick
 USER sagepick
 
 EXPOSE 8000

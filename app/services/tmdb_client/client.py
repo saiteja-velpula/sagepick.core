@@ -1,15 +1,17 @@
-from typing import Dict, Any
-from app.core.settings import settings
+from typing import Any
+
 from app.core import ApiClient, RetryConfig
+from app.core.settings import settings
+
 from .models import (
-    TMDBMovieListResponse,
-    MovieDetails,
     GenresResponse,
     KeywordsResponse,
-    MovieSearchParams,
-    MovieListResponse,
     MovieChangeResponse,
+    MovieDetails,
+    MovieListResponse,
+    MovieSearchParams,
     PaginationInfo,
+    TMDBMovieListResponse,
 )
 
 
@@ -42,11 +44,11 @@ class TMDBClient:
     async def close(self):
         await self.client.close()
 
-    def _build_params(self, **kwargs) -> Dict[str, Any]:
+    def _build_params(self, **kwargs) -> dict[str, Any]:
         return {k: v for k, v in kwargs.items() if v is not None}
 
     def _transform_list_response(
-        self, response_data: Dict[str, Any]
+        self, response_data: dict[str, Any]
     ) -> MovieListResponse:
         raw_response = TMDBMovieListResponse(**response_data)
 

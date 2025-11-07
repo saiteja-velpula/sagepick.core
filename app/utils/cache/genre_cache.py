@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -13,9 +13,9 @@ class GenreCache:
     def __init__(self):
         self._loaded = False
         self._lock = asyncio.Lock()
-        self._map: Dict[int, int] = {}  # tmdb_id -> internal_id
+        self._map: dict[int, int] = {}  # tmdb_id -> internal_id
 
-    async def get_map(self, db: AsyncSession) -> Dict[int, int]:
+    async def get_map(self, db: AsyncSession) -> dict[int, int]:
         if self._loaded:
             return self._map
 
@@ -42,12 +42,14 @@ class GenreCache:
     def set(self, tmdb_id: int, internal_id: int) -> None:
         if internal_id is None or internal_id <= 0:
             logger.warning(
-                f"Attempted to cache invalid genre ID: tmdb_id={tmdb_id}, internal_id={internal_id}"
+                "Attempted to cache invalid genre ID: " "tmdb_id=%s, internal_id=%s",
+                tmdb_id,
+                internal_id,
             )
             return
         self._map[tmdb_id] = internal_id
 
-    def set_batch(self, mappings: Dict[int, int]) -> None:
+    def set_batch(self, mappings: dict[int, int]) -> None:
         valid_mappings = {
             tmdb_id: internal_id
             for tmdb_id, internal_id in mappings.items()

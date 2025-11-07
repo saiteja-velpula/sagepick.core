@@ -1,13 +1,13 @@
 import logging
-from typing import Optional
+
 from app.services.tmdb_client.client import TMDBClient
 
 logger = logging.getLogger(__name__)
 
 
 class TMDBManager:
-    _instance: Optional[TMDBClient] = None
-    
+    _instance: TMDBClient | None = None
+
     @classmethod
     async def get_client(cls) -> TMDBClient:
         """Get the singleton TMDB client instance."""
@@ -15,7 +15,7 @@ class TMDBManager:
             logger.info("Creating TMDB client singleton instance")
             cls._instance = TMDBClient()
         return cls._instance
-    
+
     @classmethod
     async def close(cls) -> None:
         """Close the TMDB client and cleanup resources."""
@@ -23,7 +23,7 @@ class TMDBManager:
             logger.info("Closing TMDB client singleton instance")
             await cls._instance.close()
             cls._instance = None
-    
+
     @classmethod
     def is_initialized(cls) -> bool:
         return cls._instance is not None

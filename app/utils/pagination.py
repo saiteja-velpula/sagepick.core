@@ -1,5 +1,6 @@
 from math import ceil
-from typing import TypeVar, Generic, List
+from typing import TypeVar
+
 from pydantic import BaseModel
 
 T = TypeVar("T")
@@ -16,10 +17,10 @@ class PaginationInfo(BaseModel):
     has_prev: bool
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
+class PaginatedResponse[T](BaseModel):
     """Generic paginated response wrapper."""
 
-    data: List[T]
+    data: list[T]
     pagination: PaginationInfo
 
 

@@ -31,7 +31,7 @@ tests:
   - B306  # Use of insecure mktemp
   - B307  # Use of possibly insecure function eval
   - B308  # Use of mark_safe
-  - B309  # Use of HTTPSConnection
+  # B309 - HTTPSConnection removed (deprecated in modern bandit)
   - B310  # urllib urlopen
   - B311  # Random usage
   - B312  # Telnet usage
@@ -46,7 +46,7 @@ tests:
   - B321  # FTP usage
   - B323  # Unverified SSL context
   - B324  # Insecure hash function
-  - B325  # Insecure temp file
+  # B325 - Insecure temp file removed (deprecated in modern bandit)
   - B401  # Import of insecure module
   - B402  # Import of insecure module
   - B403  # Import of insecure module

@@ -1,5 +1,6 @@
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.keyword import keyword
@@ -13,10 +14,9 @@ class KeywordProcessor:
         self.cache = keyword_cache
 
     async def process_keywords(
-        self, db: AsyncSession, tmdb_keywords: Any, job_id: Optional[int] = None
-    ) -> List[int]:
-        """
-        Process TMDB keywords and return internal IDs.
+        self, db: AsyncSession, tmdb_keywords: Any, job_id: int | None = None
+    ) -> list[int]:
+        """Process TMDB keywords and return internal IDs.
 
         Args:
             db: Database session
@@ -60,9 +60,9 @@ class KeywordProcessor:
     async def _process_uncached_keywords(
         self,
         db: AsyncSession,
-        uncached_keywords: List[Dict[str, Any]],
-        job_id: Optional[int] = None,
-    ) -> List[int]:
+        uncached_keywords: list[dict[str, Any]],
+        job_id: int | None = None,
+    ) -> list[int]:
         """Process keywords not found in cache."""
         try:
             # Try batch processing first
@@ -90,12 +90,12 @@ class KeywordProcessor:
                 db, uncached_keywords, job_id
             )
 
-    async def _process_keywords_individually(
+    async def _process_one_by_one(
         self,
         db: AsyncSession,
-        keyword_data: List[Dict[str, Any]],
-        job_id: Optional[int] = None,
-    ) -> List[int]:
+        keyword_data: list[dict[str, Any]],
+        _job_id: int | None = None,
+    ) -> list[int]:
         """Fallback to individual keyword processing."""
         keyword_ids = []
 

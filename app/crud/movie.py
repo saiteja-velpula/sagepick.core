@@ -1,8 +1,7 @@
-from typing import List, Optional
-from sqlmodel import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import delete, func, or_
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 from app.crud.base import CRUDBase
 from app.models.movie import Movie, MovieCreate, MovieUpdate
@@ -11,7 +10,7 @@ from app.models.movie_keyword import MovieKeyword
 
 
 class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
-    async def get_by_tmdb_id(self, db: AsyncSession, tmdb_id: int) -> Optional[Movie]:
+    async def get_by_tmdb_id(self, db: AsyncSession, tmdb_id: int) -> Movie | None:
         statement = select(Movie).where(Movie.tmdb_id == tmdb_id)
         result = await db.execute(statement)
         return result.scalars().first()
@@ -21,8 +20,8 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         db: AsyncSession,
         *,
         movie_create: MovieCreate,
-        genre_ids: Optional[List[int]] = None,
-        keyword_ids: Optional[List[int]] = None,
+        genre_ids: list[int] | None = None,
+        keyword_ids: list[int] | None = None,
         commit: bool = True,
     ) -> Movie:
         # Prepare movie data for UPSERT
@@ -34,14 +33,14 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         excluded = stmt.excluded
         update_columns = {
             column: getattr(excluded, column)
-            for column in movie_data.keys()
+            for column in movie_data
             if column != "tmdb_id"
         }
         update_columns["updated_at"] = func.now()
 
         change_conditions = [
             Movie.__table__.c[column].is_distinct_from(getattr(excluded, column))
-            for column in movie_data.keys()
+            for column in movie_data
             if column != "tmdb_id"
         ]
 
@@ -72,7 +71,7 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
                     f"Failed to upsert movie with tmdb_id={movie_create.tmdb_id}"
                 )
             movie_id = existing.id
-        
+
         # Handle relationships with the movie ID
         relationships_changed = False
         if genre_ids is not None:
@@ -96,7 +95,7 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         self,
         db: AsyncSession,
         movie_id: int,
-        genre_ids: List[int],
+        genre_ids: list[int],
         *,
         commit: bool = True,
     ) -> bool:
@@ -109,7 +108,7 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
             return True
 
         # Normalize desired genres (preserve order, skip duplicates/None)
-        ordered_genre_ids: List[int] = []
+        ordered_genre_ids: list[int] = []
         seen: set[int] = set()
         for genre_id in genre_ids:
             if genre_id is None or genre_id in seen:
@@ -121,26 +120,28 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         statement = select(MovieGenre.genre_id).where(MovieGenre.movie_id == movie_id)
         result = await db.execute(statement)
         existing_genre_ids = set(result.scalars().all())
-        
+
         desired_genre_ids = set(ordered_genre_ids)
-        
+
         # Check if any changes are needed
         if existing_genre_ids == desired_genre_ids:
             return False  # No changes needed
-        
+
         # Remove stale relationships (PostgreSQL DELETE WHERE NOT IN)
         removed = False
         if existing_genre_ids - desired_genre_ids:  # If there are genres to remove
             stmt = delete(MovieGenre).where(
                 MovieGenre.movie_id == movie_id,
-                MovieGenre.genre_id.notin_(ordered_genre_ids)
+                MovieGenre.genre_id.notin_(ordered_genre_ids),
             )
             await db.execute(stmt)
             removed = True
 
         # Add new relationships using PostgreSQL UPSERT
         new_genre_ids = [
-            genre_id for genre_id in ordered_genre_ids if genre_id not in existing_genre_ids
+            genre_id
+            for genre_id in ordered_genre_ids
+            if genre_id not in existing_genre_ids
         ]
         inserted = False
         if new_genre_ids:
@@ -150,7 +151,7 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
             ]
 
             stmt = insert(MovieGenre.__table__).values(values)
-            stmt = stmt.on_conflict_do_nothing(index_elements=['movie_id', 'genre_id'])
+            stmt = stmt.on_conflict_do_nothing(index_elements=["movie_id", "genre_id"])
             await db.execute(stmt)
             inserted = True
 
@@ -165,7 +166,7 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         self,
         db: AsyncSession,
         movie_id: int,
-        keyword_ids: List[int],
+        keyword_ids: list[int],
         *,
         commit: bool = True,
     ) -> bool:
@@ -178,7 +179,7 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
             return True
 
         # Normalize desired keywords (preserve order, skip duplicates/None)
-        ordered_keyword_ids: List[int] = []
+        ordered_keyword_ids: list[int] = []
         seen: set[int] = set()
         for keyword_id in keyword_ids:
             if keyword_id is None or keyword_id in seen:
@@ -187,21 +188,25 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
             ordered_keyword_ids.append(keyword_id)
 
         # Load existing keyword IDs for this movie
-        statement = select(MovieKeyword.keyword_id).where(MovieKeyword.movie_id == movie_id)
+        statement = select(MovieKeyword.keyword_id).where(
+            MovieKeyword.movie_id == movie_id
+        )
         result = await db.execute(statement)
         existing_keyword_ids = set(result.scalars().all())
-        
+
         desired_keyword_ids = set(ordered_keyword_ids)
-        
+
         # Check if any changes are needed
         if existing_keyword_ids == desired_keyword_ids:
             return False  # No changes needed
-        
+
         removed = False
-        if existing_keyword_ids - desired_keyword_ids:  # If there are keywords to remove
+        if (
+            existing_keyword_ids - desired_keyword_ids
+        ):  # If there are keywords to remove
             stmt = delete(MovieKeyword).where(
                 MovieKeyword.movie_id == movie_id,
-                MovieKeyword.keyword_id.notin_(ordered_keyword_ids)
+                MovieKeyword.keyword_id.notin_(ordered_keyword_ids),
             )
             await db.execute(stmt)
             removed = True
@@ -220,7 +225,9 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
             ]
 
             stmt = insert(MovieKeyword.__table__).values(values)
-            stmt = stmt.on_conflict_do_nothing(index_elements=['movie_id', 'keyword_id'])
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["movie_id", "keyword_id"]
+            )
             await db.execute(stmt)
             inserted = True
 
@@ -232,21 +239,19 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         return removed or inserted
 
     async def get_movies_by_tmdb_ids(
-        self, db: AsyncSession, tmdb_ids: List[int]
-    ) -> List[Movie]:
+        self, db: AsyncSession, tmdb_ids: list[int]
+    ) -> list[Movie]:
         statement = select(Movie).where(Movie.tmdb_id.in_(tmdb_ids))
         result = await db.execute(statement)
         return result.scalars().all()
 
     async def get_by_tmdb_ids(
-        self, db: AsyncSession, tmdb_ids: List[int]
-    ) -> List[Movie]:
+        self, db: AsyncSession, tmdb_ids: list[int]
+    ) -> list[Movie]:
         """Alias for get_movies_by_tmdb_ids for consistency."""
         return await self.get_movies_by_tmdb_ids(db, tmdb_ids)
 
-    async def get_multi_by_ids(
-        self, db: AsyncSession, ids: List[int]
-    ) -> List[Movie]:
+    async def get_multi_by_ids(self, db: AsyncSession, ids: list[int]) -> list[Movie]:
         """Get multiple movies by their internal IDs."""
         if not ids:
             return []

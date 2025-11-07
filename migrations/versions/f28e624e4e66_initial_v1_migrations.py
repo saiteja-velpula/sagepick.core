@@ -2,7 +2,7 @@
 
 
 Revision ID: f28e624e4e66
-Revises: 
+Revises:
 Create Date: 2025-11-04 04:31:36.342262
 
 """
@@ -120,7 +120,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_genres_tmdb_id'), table_name='genres')
     op.drop_table('genres')
     # ### end Alembic commands ###
-    
+
     # drop enums
     sa.Enum(name='loglevel').drop(op.get_bind(), checkfirst=False)
     sa.Enum(name='jobexecutionstatus').drop(op.get_bind(), checkfirst=False)

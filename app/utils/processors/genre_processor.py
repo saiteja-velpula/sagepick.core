@@ -1,5 +1,6 @@
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.genre import genre
@@ -13,10 +14,9 @@ class GenreProcessor:
         self.cache = genre_cache
 
     async def process_genres(
-        self, db: AsyncSession, tmdb_genres: List[Any], job_id: Optional[int] = None
-    ) -> List[int]:
-        """
-        Process TMDB genres and return internal IDs.
+        self, db: AsyncSession, tmdb_genres: list[Any], job_id: int | None = None
+    ) -> list[int]:
+        """Process TMDB genres and return internal IDs.
 
         Args:
             db: Database session
@@ -62,9 +62,9 @@ class GenreProcessor:
     async def _process_uncached_genres(
         self,
         db: AsyncSession,
-        uncached_genres: List[Dict[str, Any]],
-        job_id: Optional[int] = None,
-    ) -> List[int]:
+        uncached_genres: list[dict[str, Any]],
+        job_id: int | None = None,
+    ) -> list[int]:
         """Process genres not found in cache."""
         try:
             # Try batch processing first
@@ -90,12 +90,12 @@ class GenreProcessor:
             logger.error(f"Batch genre processing failed: {e}")
             return await self._process_genres_individually(db, uncached_genres, job_id)
 
-    async def _process_genres_individually(
+    async def _process_one_by_one(
         self,
         db: AsyncSession,
-        genre_data: List[Dict[str, Any]],
-        job_id: Optional[int] = None,
-    ) -> List[int]:
+        genre_data: list[dict[str, Any]],
+        _job_id: int | None = None,
+    ) -> list[int]:
         """Fallback to individual genre processing."""
         genre_ids = []
 

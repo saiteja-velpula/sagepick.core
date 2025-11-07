@@ -1,14 +1,14 @@
 import asyncio
 import logging
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.db import get_session
-from app.core.redis import redis_client
 from app.core.job_execution import job_execution_manager
+from app.core.redis import redis_client
 from app.core.settings import settings
 from app.core.tmdb import get_tmdb_client
-from app.crud import job_status, job_log
+from app.crud import job_log, job_status
 from app.models.job_status import JobType
 from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
@@ -40,7 +40,10 @@ class ChangeTrackingJob:
                 await job_log.log_info(
                     db_session,
                     job_id,
-                    "Starting Change Tracking Job - fetching all changed movies from last 24 hours",
+                    (
+                        "Starting Change Tracking Job - "
+                        "fetching all changed movies from last 24 hours"
+                    ),
                 )
 
                 # Mark job as running
@@ -63,7 +66,8 @@ class ChangeTrackingJob:
                     (
                         "Change tracking summary: "
                         f"{batch_result.succeeded} succeeded, "
-                        f"{batch_result.failed} failed out of {batch_result.attempted} attempts"
+                        f"{batch_result.failed} failed "
+                        f"out of {batch_result.attempted} attempts"
                         + (
                             f" ({batch_result.skipped_locked} skipped due to locks)"
                             if batch_result.skipped_locked
@@ -109,7 +113,10 @@ class ChangeTrackingJob:
                     )
 
                     logger.info(
-                        "Change Tracking Job completed successfully. Processed %d changed movies.",
+                        (
+                            "Change Tracking Job completed successfully. "
+                            "Processed %d changed movies."
+                        ),
                         batch_result.succeeded,
                     )
 
@@ -126,11 +133,11 @@ class ChangeTrackingJob:
                 return
             except Exception as e:
                 await db_session.rollback()
-                logger.error(f"Change Tracking Job failed: {str(e)}", exc_info=True)
+                logger.error(f"Change Tracking Job failed: {e!s}", exc_info=True)
 
                 if job_id:
                     await job_log.log_error(
-                        db_session, job_id, f"Job failed with error: {str(e)}"
+                        db_session, job_id, f"Job failed with error: {e!s}"
                     )
                     await job_status.fail_job(db_session, job_id)
 
@@ -140,7 +147,11 @@ class ChangeTrackingJob:
                     await job_execution_manager.unregister(job_id)
 
     async def _track_changes(
-        self, db: AsyncSession, job_id: int, tmdb_client, cancel_event: Optional[asyncio.Event]
+        self,
+        db: AsyncSession,
+        job_id: int,
+        tmdb_client,
+        cancel_event: asyncio.Event | None,
     ) -> BatchProcessResult:
         """Track changes from TMDB changes endpoint."""
         try:
@@ -156,7 +167,10 @@ class ChangeTrackingJob:
                     await job_log.log_warning(
                         db,
                         job_id,
-                        "Cancellation requested; stopping remaining change tracking pages",
+                        (
+                            "Cancellation requested; "
+                            "stopping remaining change tracking pages"
+                        ),
                     )
                     break
 
@@ -183,7 +197,10 @@ class ChangeTrackingJob:
                 await job_log.log_info(
                     db,
                     job_id,
-                    f"Found {len(changed_movies)} changed movies on page {current_page}/{total_pages}",
+                    (
+                        f"Found {len(changed_movies)} changed movies "
+                        f"on page {current_page}/{total_pages}"
+                    ),
                 )
 
                 # Update total items estimate if this is the first page
@@ -215,7 +232,11 @@ class ChangeTrackingJob:
                         await job_log.log_info(
                             db,
                             job_id,
-                            f"Skipped {batch_result.skipped_locked} changed movies on page {current_page} due to existing locks",
+                            (
+                                f"Skipped {batch_result.skipped_locked} "
+                                f"changed movies on page {current_page} "
+                                "due to existing locks"
+                            ),
                         )
 
                 current_page += 1
@@ -225,7 +246,10 @@ class ChangeTrackingJob:
                     await job_log.log_info(
                         db,
                         job_id,
-                        f"Progress: Processed {total_succeeded} movies, on page {current_page}/{total_pages}",
+                        (
+                            f"Progress: Processed {total_succeeded} movies, "
+                            f"on page {current_page}/{total_pages}"
+                        ),
                     )
 
             return BatchProcessResult(
@@ -236,7 +260,7 @@ class ChangeTrackingJob:
             )
 
         except Exception as e:
-            await job_log.log_error(db, job_id, f"Error in _track_changes: {str(e)}")
+            await job_log.log_error(db, job_id, f"Error in _track_changes: {e!s}")
             await db.rollback()
             raise
 
