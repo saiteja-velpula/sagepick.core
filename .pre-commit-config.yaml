@@ -10,10 +10,11 @@ repos:
     hooks:
       # Run the linter
       - id: ruff
-        args: [--fix]
+        args: [--fix, --config=ruff.toml]
         types_or: [python, pyi]
       # Run the formatter
       - id: ruff-format
+        args: [--config=ruff.toml]
         types_or: [python, pyi]
 
   # MyPy - Static type checker
@@ -26,7 +27,7 @@ repos:
           - sqlalchemy[mypy]
           - pydantic
           - types-boto3
-        args: [--config-file=pyproject.toml]
+        args: [--config-file=mypy.ini]
         exclude: ^(tests/|migrations/|scripts/)
 
   # Built-in pre-commit hooks
@@ -70,7 +71,7 @@ repos:
     rev: 1.7.10
     hooks:
       - id: bandit
-        args: [-c, pyproject.toml, -r, app/]
+        args: [-c, bandit.yaml]
         additional_dependencies: ["bandit[toml]"]
 
   # Docstring coverage checker
@@ -78,7 +79,7 @@ repos:
     rev: 1.7.0
     hooks:
       - id: interrogate
-        args: [--config=pyproject.toml]
+        args: [--config=.interrogate.toml]
         pass_filenames: false
 
   # YAML linter
