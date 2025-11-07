@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, Column
@@ -61,11 +61,11 @@ class Movie(MovieBase, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=lambda: datetime.now(),
         description="Record creation timestamp",
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), description="Record update timestamp"
+        default_factory=lambda: datetime.now(), description="Record update timestamp"
     )
 
     # Many-to-many relationships

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -77,7 +77,7 @@ class DatasetExportJob:
                 if cancel_event and cancel_event.is_set():
                     raise asyncio.CancelledError()
 
-                timestamp = datetime.now(UTC)
+                timestamp = datetime.now()
                 object_key = self._build_object_key(timestamp)
 
                 writer = S3DatasetWriter(

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -28,8 +28,8 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
         job_status = await self.get(db, job_id)
         if job_status:
             job_status.status = JobExecutionStatus.RUNNING
-            job_status.started_at = datetime.now(UTC)
-            job_status.updated_at = datetime.now(UTC)
+            job_status.started_at = datetime.now()
+            job_status.updated_at = datetime.now()
             db.add(job_status)
             await db.commit()
             await db.refresh(job_status)
@@ -45,12 +45,12 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
         job_status = await self.get(db, job_id)
         if job_status:
             job_status.status = JobExecutionStatus.COMPLETED
-            job_status.completed_at = datetime.now(UTC)
+            job_status.completed_at = datetime.now()
             if items_processed is not None:
                 job_status.processed_items = items_processed
             if failed_items is not None:
                 job_status.failed_items = failed_items
-            job_status.updated_at = datetime.now(UTC)
+            job_status.updated_at = datetime.now()
             db.add(job_status)
             await db.commit()
             await db.refresh(job_status)
@@ -66,12 +66,12 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
         job_status = await self.get(db, job_id)
         if job_status:
             job_status.status = JobExecutionStatus.FAILED
-            job_status.completed_at = datetime.now(UTC)
+            job_status.completed_at = datetime.now()
             if processed_items is not None:
                 job_status.processed_items = processed_items
             if failed_items is not None:
                 job_status.failed_items = failed_items
-            job_status.updated_at = datetime.now(UTC)
+            job_status.updated_at = datetime.now()
             db.add(job_status)
             await db.commit()
             await db.refresh(job_status)
@@ -87,12 +87,12 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
         job_status = await self.get(db, job_id)
         if job_status:
             job_status.status = JobExecutionStatus.CANCELLED
-            job_status.completed_at = datetime.now(UTC)
+            job_status.completed_at = datetime.now()
             if processed_items is not None:
                 job_status.processed_items = processed_items
             if failed_items is not None:
                 job_status.failed_items = failed_items
-            job_status.updated_at = datetime.now(UTC)
+            job_status.updated_at = datetime.now()
             db.add(job_status)
             await db.commit()
             await db.refresh(job_status)
@@ -117,7 +117,7 @@ class CRUDJobStatus(CRUDBase[JobStatus, JobStatusCreate, JobStatusUpdate]):
                 job_status.processed_items += processed_delta
             if failed_delta:
                 job_status.failed_items += failed_delta
-            job_status.updated_at = datetime.now(UTC)
+            job_status.updated_at = datetime.now()
             db.add(job_status)
             if commit:
                 await db.commit()

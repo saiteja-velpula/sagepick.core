@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -26,10 +26,10 @@ class MovieDiscoveryStateCRUD:
         state = await self.get_state(db)
         if state:
             state.current_page = current_page
-            state.updated_at = datetime.now(UTC)
+            state.updated_at = datetime.now()
         else:
             state = MovieDiscoveryState(
-                id=1, current_page=current_page, updated_at=datetime.now(UTC)
+                id=1, current_page=current_page, updated_at=datetime.now()
             )
         db.add(state)
         await db.commit()

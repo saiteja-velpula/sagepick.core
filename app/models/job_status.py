@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import Enum
 
 from sqlmodel import Field, SQLModel
@@ -37,11 +37,11 @@ class JobStatus(JobStatusBase, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=lambda: datetime.now(),
         description="Record creation timestamp",
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC), description="Record update timestamp"
+        default_factory=lambda: datetime.now(), description="Record update timestamp"
     )
 
 

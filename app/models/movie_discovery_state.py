@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlmodel import Field, SQLModel
 
@@ -11,6 +11,6 @@ class MovieDiscoveryState(SQLModel, table=True):
         default=1, ge=1, description="Last processed TMDB discover page"
     )
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=lambda: datetime.now(),
         description="Timestamp of the most recent update",
     )
