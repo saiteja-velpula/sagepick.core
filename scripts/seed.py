@@ -10,9 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.redis import redis_client
-from app.crud import job_log, job_status, media_category
+from app.crud import job_log, job_status
 from app.models.job_status import JobType
-from app.models.media_category import MediaCategoryBase
 from app.services.tmdb_client.client import TMDBClient
 from app.utils.movie_processor import BatchProcessResult, process_movie_batch
 
@@ -246,10 +245,7 @@ class DatabaseSeeder:
                 # Mark job as running
                 await job_status.start_job(db_session, job_id)
 
-                # Create categories first
-                await self._create_categories(db_session, job_id)
-
-                # Seed movies for each category (just movies, no associations)
+                # Seed movies for each category
                 overall_result = BatchProcessResult()
                 for _category_key, category_info in self.active_categories.items():
                     category_result = await self._seed_category_movies(
@@ -283,8 +279,6 @@ class DatabaseSeeder:
                             if overall_result.skipped_locked
                             else ""
                         )
-                        + ". "
-                        "Category associations will be handled by category_refresh job."
                     ),
                 )
 
@@ -319,43 +313,6 @@ class DatabaseSeeder:
                 if self.tmdb_client:
                     await self.tmdb_client.close()
                 break  # noqa: B012
-
-    async def _create_categories(self, db: AsyncSession, job_id: int):
-        await job_log.log_info(db, job_id, "Creating media categories...")
-
-        for _category_key, category_info in self.active_categories.items():
-            try:
-                # Check if category already exists
-                existing_category = await media_category.get_by_name(
-                    db, category_info["name"]
-                )
-
-                if existing_category:
-                    logger.info(
-                        "Category '%s' already exists, skipping...",
-                        category_info["name"],
-                    )
-                    continue
-
-                # Create new category
-                category_create = MediaCategoryBase(
-                    name=category_info["name"], description=category_info["description"]
-                )
-
-                await media_category.create(db, obj_in=category_create)
-                logger.info(f"Created category: {category_info['name']}")
-
-                await job_log.log_info(
-                    db, job_id, f"Created category: {category_info['name']}"
-                )
-
-            except Exception as e:
-                error_msg = (
-                    f"Failed to create category '{category_info['name']}': {e!s}"
-                )
-                logger.error(error_msg)
-                await job_log.log_error(db, job_id, error_msg)
-                await db.rollback()
 
     async def _seed_category_movies(
         self, db: AsyncSession, job_id: int, category_name: str, method_name: str

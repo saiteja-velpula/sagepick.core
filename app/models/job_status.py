@@ -5,17 +5,17 @@ from sqlmodel import Field, SQLModel
 
 
 class JobType(str, Enum):
-    MOVIE_DISCOVERY = "movie_discovery"
-    CHANGE_TRACKING = "change_tracking"
-    DATASET_EXPORT = "dataset_export"
+    MOVIE_DISCOVERY = "MOVIE_DISCOVERY"
+    CHANGE_TRACKING = "CHANGE_TRACKING"
+    DATASET_EXPORT = "DATASET_EXPORT"
 
 
 class JobExecutionStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class JobStatusBase(SQLModel):
