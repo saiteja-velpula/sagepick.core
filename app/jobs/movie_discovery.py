@@ -229,8 +229,6 @@ class MovieDiscoveryJob:
                         break
 
                     # Acquire lock if configured
-                    from app.core.redis import redis_client
-
                     lock_acquired = await redis_client.acquire_movie_lock(movie_id)
                     if not lock_acquired:
                         batch_result.skipped_locked += 1

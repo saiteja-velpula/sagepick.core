@@ -319,11 +319,31 @@ class DatabaseSeeder:
     ) -> BatchProcessResult:
         logger.info(f"Seeding movies from {category_name} category...")
 
-        await job_log.log_info(
-            db,
-            job_id,
-            f"Starting to seed {PAGES_PER_CATEGORY} pages from {category_name}",
-        )
+        # Regional cinema categories that need two-phase fetching
+        regional_categories = {
+            "bollywood",
+            "tollywood",
+            "kollywood",
+            "mollywood",
+            "sandalwood",
+            "hollywood",
+        }
+
+        is_regional = category_name in regional_categories
+
+        if is_regional:
+            await job_log.log_info(
+                db,
+                job_id,
+                f"Starting two-phase seeding for {category_name}: "
+                f"Phase 1 (newest first), Phase 2 (most popular)",
+            )
+        else:
+            await job_log.log_info(
+                db,
+                job_id,
+                f"Starting to seed {PAGES_PER_CATEGORY} pages from {category_name}",
+            )
 
         category_result = BatchProcessResult()
 
@@ -338,77 +358,111 @@ class DatabaseSeeder:
 
         method = getattr(self.tmdb_client, method_name)
 
-        # Process each page
-        for page in range(1, PAGES_PER_CATEGORY + 1):
-            try:
+        # Determine phases to run
+        if is_regional:
+            phases = [
+                ("newest", "primary_release_date.desc", 1, PAGES_PER_CATEGORY + 1),
+                ("popular", "popularity.desc", 1, PAGES_PER_CATEGORY + 1),
+            ]
+        else:
+            phases = [("default", None, 1, PAGES_PER_CATEGORY + 1)]
+
+        # Process each phase
+        for phase_name, sort_by, start_page, end_page in phases:
+            if is_regional and phase_name != "default":
                 logger.info(
-                    f"Processing page {page}/{PAGES_PER_CATEGORY} for {category_name}"
+                    f"Phase {phase_name}: Fetching pages {start_page}-{end_page - 1} "
+                    f"for {category_name} sorted by {sort_by}"
                 )
-
-                # Get movies from TMDB
-                movie_results = await method(page=page)
-
-                if not movie_results or not movie_results.movies:
-                    await job_log.log_warning(
-                        db, job_id, f"No movies found for {category_name} page {page}"
-                    )
-                    continue
-
-                # Extract movie IDs
-                movie_ids = [movie.tmdb_id for movie in movie_results.movies]
-
-                # Process the batch using new processor (Processor 2: discovery mode)
-                page_result = BatchProcessResult()
-                for movie_id in movie_ids:
-                    page_result.attempted += 1
-                    try:
-                        movie_obj = await fetch_and_insert_full(
-                            db,
-                            self.tmdb_client,
-                            movie_id,
-                            hydration_source="seed",
-                            job_id=job_id,
-                        )
-                        if movie_obj:
-                            page_result.succeeded += 1
-                        else:
-                            page_result.skipped_existing += 1
-                    except Exception as e:
-                        page_result.failed += 1
-                        logger.error(f"Error processing movie {movie_id}: {e!s}")
-                        await job_log.log_error(
-                            db, job_id, f"Error processing movie {movie_id}: {e!s}"
-                        )
-
-                category_result.attempted += page_result.attempted
-                category_result.succeeded += page_result.succeeded
-                category_result.failed += page_result.failed
-                category_result.skipped_locked += page_result.skipped_existing
-
                 await job_log.log_info(
                     db,
                     job_id,
-                    (
-                        f"Completed page {page} for {category_name}: "
-                        f"{page_result.succeeded} succeeded, "
-                        f"{page_result.failed} failed out of {page_result.attempted}"
-                        + (
-                            f" ({page_result.skipped_locked} skipped due to locks)"
-                            if page_result.skipped_locked
-                            else ""
-                        )
-                    ),
+                    f"Starting phase '{phase_name}' for {category_name} "
+                    f"(sort: {sort_by})",
                 )
 
-                # Add delay between pages
-                await asyncio.sleep(API_DELAY)
+            # Process each page in this phase
+            for page in range(start_page, end_page):
+                try:
+                    logger.info(
+                        f"Processing page {page}/{PAGES_PER_CATEGORY} "
+                        f"for {category_name}"
+                    )
 
-            except Exception as e:
-                error_msg = f"Failed to process page {page} for {category_name}: {e!s}"
-                logger.error(error_msg)
-                await job_log.log_error(db, job_id, error_msg)
-                await db.rollback()
-                continue
+                    # Get movies from TMDB - pass sort_by for regional
+                    # categories
+                    if sort_by:
+                        movie_results = await method(page=page, sort_by=sort_by)
+                    else:
+                        movie_results = await method(page=page)
+
+                    if not movie_results or not movie_results.movies:
+                        await job_log.log_warning(
+                            db,
+                            job_id,
+                            f"No movies found for {category_name} page {page}",
+                        )
+                        continue
+
+                    # Extract movie IDs
+                    movie_ids = [movie.tmdb_id for movie in movie_results.movies]
+
+                    # Process batch using processor 2 (discovery mode)
+                    page_result = BatchProcessResult()
+                    for movie_id in movie_ids:
+                        page_result.attempted += 1
+                        try:
+                            movie_obj = await fetch_and_insert_full(
+                                db,
+                                self.tmdb_client,
+                                movie_id,
+                                hydration_source="seed",
+                                job_id=job_id,
+                            )
+                            if movie_obj:
+                                page_result.succeeded += 1
+                            else:
+                                page_result.skipped_existing += 1
+                        except Exception as e:
+                            page_result.failed += 1
+                            logger.error(f"Error processing movie {movie_id}: {e!s}")
+                            await job_log.log_error(
+                                db, job_id, f"Error processing movie {movie_id}: {e!s}"
+                            )
+
+                    category_result.attempted += page_result.attempted
+                    category_result.succeeded += page_result.succeeded
+                    category_result.failed += page_result.failed
+                    category_result.skipped_locked += page_result.skipped_existing
+
+                    await job_log.log_info(
+                        db,
+                        job_id,
+                        (
+                            f"Completed page {page} for {category_name}: "
+                            f"{page_result.succeeded} succeeded, "
+                            f"{page_result.failed} failed "
+                            f"out of {page_result.attempted}"
+                            + (
+                                f" ({page_result.skipped_locked} "
+                                "skipped due to locks)"
+                                if page_result.skipped_locked
+                                else ""
+                            )
+                        ),
+                    )
+
+                    # Add delay between pages
+                    await asyncio.sleep(API_DELAY)
+
+                except Exception as e:
+                    error_msg = (
+                        f"Failed to process page {page} for {category_name}: {e!s}"
+                    )
+                    logger.error(error_msg)
+                    await job_log.log_error(db, job_id, error_msg)
+                    await db.rollback()
+                    continue
 
         logger.info(
             "Completed seeding for %s: %d succeeded, %d failed out of %d",

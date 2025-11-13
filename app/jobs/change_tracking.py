@@ -225,8 +225,6 @@ class ChangeTrackingJob:
                             break
 
                         # Acquire lock
-                        from app.core.redis import redis_client
-
                         lock_acquired = await redis_client.acquire_movie_lock(movie_id)
                         if not lock_acquired:
                             total_skipped_locked += 1

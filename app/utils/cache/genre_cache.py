@@ -42,7 +42,7 @@ class GenreCache:
     def set(self, tmdb_id: int, internal_id: int) -> None:
         if internal_id is None or internal_id <= 0:
             logger.warning(
-                "Attempted to cache invalid genre ID: " "tmdb_id=%s, internal_id=%s",
+                "Attempted to cache invalid genre ID: tmdb_id=%s, internal_id=%s",
                 tmdb_id,
                 internal_id,
             )

@@ -88,7 +88,7 @@ def read_root():
         "name": "Sagepick Core Backend!",
         "version": app_version,
         "description": (
-            "Movie recommendation system with automated " "TMDB data synchronization"
+            "Movie recommendation system with automated TMDB data synchronization"
         ),
     }
 

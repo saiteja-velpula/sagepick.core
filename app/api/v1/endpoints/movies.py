@@ -8,6 +8,7 @@ from sqlmodel import func, select
 
 from app.api.deps import verify_token
 from app.core.db import get_session
+from app.core.tmdb import get_tmdb_client
 from app.crud.movie import movie as movie_crud
 from app.models.api_models import (
     GenreDict,
@@ -19,6 +20,7 @@ from app.models.genre import Genre
 from app.models.keyword import Keyword
 from app.models.movie import Movie
 from app.models.movie_genre import MovieGenre
+from app.utils.movie_processor import fetch_and_insert_full
 from app.utils.pagination import (
     PaginatedResponse,
     calculate_offset,
@@ -170,9 +172,6 @@ async def get_movie_by_id(
 
     # Check if movie needs hydration
     if not movie_obj.is_hydrated:
-        from app.core.tmdb import get_tmdb_client
-        from app.utils.movie_processor import fetch_and_insert_full
-
         logger.info(f"Movie {movie_obj.tmdb_id} not hydrated, hydrating now...")
 
         # Hydrate synchronously (user is waiting for this specific movie)
@@ -197,8 +196,7 @@ async def get_movie_by_id(
             logger.info(f"Movie {movie_obj.tmdb_id} hydrated successfully")
         else:
             logger.warning(
-                f"Failed to hydrate movie {movie_obj.tmdb_id}, "
-                "returning partial data"
+                f"Failed to hydrate movie {movie_obj.tmdb_id}, returning partial data"
             )
 
     # Convert to response format using eager-loaded relationships

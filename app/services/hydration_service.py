@@ -13,6 +13,7 @@ import logging
 from app.core.db import get_session
 from app.core.redis import redis_client
 from app.core.tmdb import get_tmdb_client
+from app.utils.movie_processor import fetch_and_insert_full
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +96,6 @@ class HydrationService:
                     continue
 
                 # Process batch using Processor 2
-                from app.utils.movie_processor import fetch_and_insert_full
-
                 tmdb_client = await get_tmdb_client()
 
                 async for db_session in get_session():

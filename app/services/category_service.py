@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.redis import redis_client
 from app.core.tmdb import get_tmdb_client
 from app.crud.movie import movie as movie_crud
+from app.utils.movie_processor import insert_from_list_and_queue
 
 logger = logging.getLogger(__name__)
 
@@ -222,8 +223,6 @@ class CategoryService:
 
         # Use Processor 1: Insert lightweight + queue for background hydration
         if missing_movies:
-            from app.utils.movie_processor import insert_from_list_and_queue
-
             logger.info(
                 f"Inserting {len(missing_movies)} missing movies for {category}"
             )
