@@ -1,3 +1,8 @@
+"""
+DEPRECATED: This test file tests the old process_movie_batch function
+which has been removed.
+"""
+
 import types
 
 import pytest
@@ -5,6 +10,9 @@ import pytest
 from app.utils import movie_processor
 
 
+@pytest.mark.skip(
+    reason="Old processor architecture - needs update for new 3-processor design"
+)
 @pytest.mark.asyncio
 async def test_process_movie_batch_aggregates_status(monkeypatch):
     processed_calls = []

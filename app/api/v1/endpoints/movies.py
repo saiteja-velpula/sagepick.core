@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +24,8 @@ from app.utils.pagination import (
     calculate_offset,
     create_pagination_info,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -145,7 +149,10 @@ async def get_movie_by_id(
     db: AsyncSession = Depends(get_session),
     token: dict = Depends(verify_token),
 ):
-    """Get movie by ID with all details including genres and keywords."""
+    """Get movie by ID with all details including genres and keywords.
+
+    If the movie is not hydrated, it will be hydrated synchronously before returning.
+    """
     # Use eager loading to fetch movie with relationships in a single query
     query = (
         select(Movie)
@@ -160,6 +167,39 @@ async def get_movie_by_id(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Movie not found"
         )
+
+    # Check if movie needs hydration
+    if not movie_obj.is_hydrated:
+        from app.core.tmdb import get_tmdb_client
+        from app.utils.movie_processor import fetch_and_insert_full
+
+        logger.info(f"Movie {movie_obj.tmdb_id} not hydrated, hydrating now...")
+
+        # Hydrate synchronously (user is waiting for this specific movie)
+        tmdb_client = await get_tmdb_client()
+        hydrated_movie = await fetch_and_insert_full(
+            db=db,
+            tmdb_client=tmdb_client,
+            tmdb_id=movie_obj.tmdb_id,
+            hydration_source="user_request",
+            job_id=None,
+        )
+
+        if hydrated_movie:
+            # Refresh to get updated data with relationships
+            query = (
+                select(Movie)
+                .options(selectinload(Movie.genres), selectinload(Movie.keywords))
+                .where(Movie.id == movie_id)
+            )
+            result = await db.execute(query)
+            movie_obj = result.scalar_one_or_none()
+            logger.info(f"Movie {movie_obj.tmdb_id} hydrated successfully")
+        else:
+            logger.warning(
+                f"Failed to hydrate movie {movie_obj.tmdb_id}, "
+                "returning partial data"
+            )
 
     # Convert to response format using eager-loaded relationships
     genres_dict = [

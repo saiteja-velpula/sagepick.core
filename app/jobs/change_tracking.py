@@ -10,7 +10,7 @@ from app.core.settings import settings
 from app.core.tmdb import get_tmdb_client
 from app.crud import job_log, job_status
 from app.models.job_status import JobType
-from app.utils.movie_processor import BatchProcessResult, process_movie_batch
+from app.utils.movie_processor import BatchProcessResult, fetch_and_upsert_full
 
 logger = logging.getLogger(__name__)
 
@@ -213,27 +213,59 @@ class ChangeTrackingJob:
                     movie_data.id for movie_data in changed_movies if movie_data.id
                 ]
 
-                # Process movies in batch using utility function
+                # Process movies using Processor 3 (always update)
                 if movie_ids:
-                    batch_result = await process_movie_batch(
-                        db,
-                        tmdb_client,
-                        movie_ids,
-                        job_id,
-                        use_locks=True,
-                        cancel_event=cancel_event,
-                    )
-                    total_attempted += batch_result.attempted
-                    total_succeeded += batch_result.succeeded
-                    total_failed += batch_result.failed
-                    total_skipped_locked += batch_result.skipped_locked
+                    for movie_id in movie_ids:
+                        if cancel_event and cancel_event.is_set():
+                            await job_log.log_warning(
+                                db,
+                                job_id,
+                                "Cancellation requested; stopping movie processing",
+                            )
+                            break
 
-                    if batch_result.skipped_locked:
+                        # Acquire lock
+                        from app.core.redis import redis_client
+
+                        lock_acquired = await redis_client.acquire_movie_lock(movie_id)
+                        if not lock_acquired:
+                            total_skipped_locked += 1
+                            continue
+
+                        try:
+                            total_attempted += 1
+                            processed_movie = await fetch_and_upsert_full(
+                                db, tmdb_client, movie_id, job_id=job_id
+                            )
+
+                            if processed_movie:
+                                total_succeeded += 1
+                            else:
+                                total_failed += 1
+
+                        except Exception as e:
+                            total_failed += 1
+                            await job_log.log_error(
+                                db, job_id, f"Error processing movie {movie_id}: {e!s}"
+                            )
+                        finally:
+                            await redis_client.release_movie_lock(movie_id)
+
+                    # Update job status
+                    if total_succeeded or total_failed:
+                        await job_status.increment_counts(
+                            db,
+                            job_id,
+                            processed_delta=total_succeeded,
+                            failed_delta=total_failed,
+                        )
+
+                    if total_skipped_locked:
                         await job_log.log_info(
                             db,
                             job_id,
                             (
-                                f"Skipped {batch_result.skipped_locked} "
+                                f"Skipped {total_skipped_locked} "
                                 f"changed movies on page {current_page} "
                                 "due to existing locks"
                             ),

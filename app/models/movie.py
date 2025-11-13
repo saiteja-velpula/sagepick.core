@@ -55,6 +55,20 @@ class MovieBase(SQLModel):
     )
     adult: bool = Field(default=False, description="Adult content flag")
 
+    # Hydration tracking
+    is_hydrated: bool = Field(
+        default=False,
+        description="Whether full movie details have been fetched",
+    )
+    last_hydrated_at: datetime | None = Field(
+        default=None, description="Timestamp of last full hydration"
+    )
+    hydration_source: str | None = Field(
+        default=None,
+        max_length=50,
+        description="Source of hydration: 'job', 'user_request', or 'background'",
+    )
+
 
 class Movie(MovieBase, table=True):
     __tablename__ = "movies"
@@ -91,6 +105,9 @@ class MovieUpdate(SQLModel):
     revenue: int | None = None
     status: str | None = None
     adult: bool | None = None
+    is_hydrated: bool | None = None
+    last_hydrated_at: datetime | None = None
+    hydration_source: str | None = None
 
 
 class MovieCreate(MovieBase):

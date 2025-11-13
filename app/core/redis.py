@@ -135,6 +135,58 @@ class RedisClient:
             logger.error(f"Failed to extend movie lock for {movie_id}: {e}")
             return False
 
+    # Redis Set operations for hydration queue
+    async def sadd(self, key: str, *values) -> int:
+        """Add one or more members to a set."""
+        if not self.redis:
+            return 0
+        try:
+            return await self.redis.sadd(key, *values)
+        except Exception as exc:
+            logger.error(f"Failed to sadd to Redis set {key}: {exc}")
+            return 0
+
+    async def sismember(self, key: str, value) -> bool:
+        """Check if a value is a member of a set."""
+        if not self.redis:
+            return False
+        try:
+            return await self.redis.sismember(key, value)
+        except Exception as exc:
+            logger.error(f"Failed to check sismember in Redis set {key}: {exc}")
+            return False
+
+    async def scard(self, key: str) -> int:
+        """Get the number of members in a set."""
+        if not self.redis:
+            return 0
+        try:
+            return await self.redis.scard(key)
+        except Exception as exc:
+            logger.error(f"Failed to get scard for Redis set {key}: {exc}")
+            return 0
+
+    async def spop(self, key: str) -> str | None:
+        """Remove and return a random member from a set."""
+        if not self.redis:
+            return None
+        try:
+            return await self.redis.spop(key)
+        except Exception as exc:
+            logger.error(f"Failed to spop from Redis set {key}: {exc}")
+            return None
+
+    async def exists(self, key: str) -> bool:
+        """Check if a key exists."""
+        if not self.redis:
+            return False
+        try:
+            result = await self.redis.exists(key)
+            return result > 0
+        except Exception as exc:
+            logger.error(f"Failed to check existence of Redis key {key}: {exc}")
+            return False
+
 
 # Global Redis client instance
 redis_client = RedisClient()

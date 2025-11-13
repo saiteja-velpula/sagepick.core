@@ -87,8 +87,8 @@ class GenreProcessor:
             return genre_ids
 
         except Exception as e:
-            logger.error(f"Batch genre processing failed: {e}")
-            return await self._process_genres_individually(db, uncached_genres, job_id)
+            logger.error(f"Batch genre processing failed: {e}", exc_info=True)
+            return await self._process_one_by_one(db, uncached_genres, job_id)
 
     async def _process_one_by_one(
         self,

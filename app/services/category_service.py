@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.redis import redis_client
 from app.core.tmdb import get_tmdb_client
 from app.crud.movie import movie as movie_crud
-from app.utils.movie_processor import process_movie_batch
 
 logger = logging.getLogger(__name__)
 
@@ -193,9 +192,7 @@ class CategoryService:
     async def _fetch_and_process_movies(
         self, db: AsyncSession, tmdb_movies: list[Any], category: str
     ) -> list[int]:
-        movie_ids = []
-        tmdb_ids_to_fetch = []
-
+        """Use Processor 1 to insert movies lightweight and queue for hydration."""
         # Extract TMDB IDs from results
         tmdb_id_list = [
             movie.tmdb_id for movie in tmdb_movies if hasattr(movie, "tmdb_id")
@@ -203,11 +200,11 @@ class CategoryService:
 
         if not tmdb_id_list:
             logger.warning(f"No valid TMDB IDs found for category {category}")
-            return movie_ids
+            return []
 
         # Check which movies already exist in our DB
         existing_movies = await movie_crud.get_by_tmdb_ids(db, tmdb_id_list)
-        existing_tmdb_ids = {movie.tmdb_id: movie.id for movie in existing_movies}
+        existing_tmdb_ids_set = {movie.tmdb_id for movie in existing_movies}
 
         logger.info(
             "Found %d/%d movies in DB for %s",
@@ -216,45 +213,34 @@ class CategoryService:
             category,
         )
 
-        # Add existing movie IDs to result
-        for tmdb_id in tmdb_id_list:
-            if tmdb_id in existing_tmdb_ids:
-                movie_ids.append(existing_tmdb_ids[tmdb_id])
-            else:
-                tmdb_ids_to_fetch.append(tmdb_id)
+        # Find missing movies
+        missing_movies = [
+            movie
+            for movie in tmdb_movies
+            if hasattr(movie, "tmdb_id") and movie.tmdb_id not in existing_tmdb_ids_set
+        ]
 
-        # Fetch missing movies from TMDB and store in DB
-        if tmdb_ids_to_fetch:
-            logger.info(f"Fetching {len(tmdb_ids_to_fetch)} missing movies from TMDB")
-            tmdb_client = await get_tmdb_client()
-
-            # Process missing movies in batch
-            batch_result = await process_movie_batch(
-                db=db,
-                tmdb_client=tmdb_client,
-                movie_ids=tmdb_ids_to_fetch,
-                job_id=None,  # No job tracking for category requests
-                use_locks=False,  # Skip locks for category fetching
-                cancel_event=None,
-            )
-
-            # Get the newly created movies and add their IDs
-            new_movies = await movie_crud.get_by_tmdb_ids(db, tmdb_ids_to_fetch)
-            for movie in new_movies:
-                # Insert at correct position to maintain order
-                try:
-                    original_index = tmdb_id_list.index(movie.tmdb_id)
-                    if original_index < len(movie_ids):
-                        movie_ids.insert(original_index, movie.id)
-                    else:
-                        movie_ids.append(movie.id)
-                except ValueError:
-                    movie_ids.append(movie.id)
+        # Use Processor 1: Insert lightweight + queue for background hydration
+        if missing_movies:
+            from app.utils.movie_processor import insert_from_list_and_queue
 
             logger.info(
-                f"Successfully processed {batch_result.succeeded} movies for {category}"
+                f"Inserting {len(missing_movies)} missing movies for {category}"
+            )
+            await insert_from_list_and_queue(
+                db, missing_movies, queue_for_hydration=True
             )
 
+        # Get all movies (both existing and newly inserted)
+        all_movies = await movie_crud.get_by_tmdb_ids(db, tmdb_id_list)
+        movie_id_map = {movie.tmdb_id: movie.id for movie in all_movies}
+
+        # Return IDs in original order
+        movie_ids = [
+            movie_id_map[tmdb_id] for tmdb_id in tmdb_id_list if tmdb_id in movie_id_map
+        ]
+
+        logger.info(f"Processed {len(movie_ids)} movies for {category}")
         return movie_ids
 
     async def get_category_movies(

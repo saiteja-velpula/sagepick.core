@@ -11,7 +11,7 @@ from app.core.tmdb import get_tmdb_client
 from app.crud import job_log, job_status, movie_discovery_state
 from app.models import JobType
 from app.services.tmdb_client.models import MovieSearchParams
-from app.utils.movie_processor import BatchProcessResult, process_movie_batch
+from app.utils.movie_processor import BatchProcessResult, fetch_and_insert_full
 
 logger = logging.getLogger(__name__)
 
@@ -218,14 +218,58 @@ class MovieDiscoveryJob:
 
             batch_result = BatchProcessResult()
             if movie_ids:
-                batch_result = await process_movie_batch(
-                    db,
-                    tmdb_client,
-                    movie_ids,
-                    job_id,
-                    use_locks=True,
-                    cancel_event=cancel_event,
-                )
+                # Use Processor 2: fetch_and_insert_full (insert only, skip existing)
+                for movie_id in movie_ids:
+                    if cancel_event and cancel_event.is_set():
+                        await job_log.log_warning(
+                            db,
+                            job_id,
+                            "Cancellation requested; stopping movie processing",
+                        )
+                        break
+
+                    # Acquire lock if configured
+                    from app.core.redis import redis_client
+
+                    lock_acquired = await redis_client.acquire_movie_lock(movie_id)
+                    if not lock_acquired:
+                        batch_result.skipped_locked += 1
+                        await job_log.log_info(
+                            db, job_id, f"Skipped movie {movie_id} due to existing lock"
+                        )
+                        continue
+
+                    try:
+                        batch_result.attempted += 1
+                        processed_movie = await fetch_and_insert_full(
+                            db,
+                            tmdb_client,
+                            movie_id,
+                            hydration_source="job",
+                            job_id=job_id,
+                        )
+
+                        if processed_movie:
+                            batch_result.succeeded += 1
+                        else:
+                            batch_result.failed += 1
+
+                    except Exception as e:
+                        batch_result.failed += 1
+                        await job_log.log_error(
+                            db, job_id, f"Error processing movie {movie_id}: {e!s}"
+                        )
+                    finally:
+                        await redis_client.release_movie_lock(movie_id)
+
+                # Update job status
+                if batch_result.succeeded or batch_result.failed:
+                    await job_status.increment_counts(
+                        db,
+                        job_id,
+                        processed_delta=batch_result.succeeded,
+                        failed_delta=batch_result.failed,
+                    )
 
             if batch_result.skipped_locked:
                 await job_log.log_info(

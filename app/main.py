@@ -11,6 +11,7 @@ from app.core.middleware import CorrelationIdMiddleware
 from app.core.redis import redis_client
 from app.core.scheduler import job_scheduler
 from app.core.tmdb import close_tmdb_client
+from app.services.hydration_service import hydration_service
 from app.utils.helpers import preload_genres
 
 # Setup structured logging
@@ -32,6 +33,10 @@ async def lifespan(_app: FastAPI):
         await job_scheduler.start()
         logger.info("Job scheduler started")
 
+        # Start hydration background worker
+        await hydration_service.start_worker()
+        logger.info("Hydration background worker started")
+
         # Preload genres into the database and cache
         async with async_session() as db:
             await preload_genres(db)
@@ -41,6 +46,10 @@ async def lifespan(_app: FastAPI):
     finally:
         # Shutdown
         logger.info("Shutting down SAGEPICK Core application...")
+
+        # Stop hydration worker
+        await hydration_service.stop_worker()
+        logger.info("Hydration worker stopped")
 
         # Stop job scheduler
         await job_scheduler.stop()

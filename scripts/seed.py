@@ -13,7 +13,7 @@ from app.core.redis import redis_client
 from app.crud import job_log, job_status
 from app.models.job_status import JobType
 from app.services.tmdb_client.client import TMDBClient
-from app.utils.movie_processor import BatchProcessResult, process_movie_batch
+from app.utils.movie_processor import BatchProcessResult, fetch_and_insert_full
 
 # Configure logging
 logging.basicConfig(
@@ -357,15 +357,33 @@ class DatabaseSeeder:
                 # Extract movie IDs
                 movie_ids = [movie.tmdb_id for movie in movie_results.movies]
 
-                # Process the batch using utility function
-                page_result = await process_movie_batch(
-                    db, self.tmdb_client, movie_ids, job_id, use_locks=True
-                )
+                # Process the batch using new processor (Processor 2: discovery mode)
+                page_result = BatchProcessResult()
+                for movie_id in movie_ids:
+                    page_result.attempted += 1
+                    try:
+                        movie_obj = await fetch_and_insert_full(
+                            db,
+                            self.tmdb_client,
+                            movie_id,
+                            hydration_source="seed",
+                            job_id=job_id,
+                        )
+                        if movie_obj:
+                            page_result.succeeded += 1
+                        else:
+                            page_result.skipped_existing += 1
+                    except Exception as e:
+                        page_result.failed += 1
+                        logger.error(f"Error processing movie {movie_id}: {e!s}")
+                        await job_log.log_error(
+                            db, job_id, f"Error processing movie {movie_id}: {e!s}"
+                        )
 
                 category_result.attempted += page_result.attempted
                 category_result.succeeded += page_result.succeeded
                 category_result.failed += page_result.failed
-                category_result.skipped_locked += page_result.skipped_locked
+                category_result.skipped_locked += page_result.skipped_existing
 
                 await job_log.log_info(
                     db,

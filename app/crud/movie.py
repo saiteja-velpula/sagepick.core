@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import delete, func, or_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -261,6 +263,139 @@ class CRUDMovie(CRUDBase[Movie, MovieCreate, MovieUpdate]):
         movies = result.scalars().all()
         movie_map = {movie.id: movie for movie in movies}
         return [movie_map[mid] for mid in ids if mid in movie_map]
+
+    async def insert_movie_from_tmdb_list(
+        self,
+        db: AsyncSession,
+        tmdb_movie_item: "MovieItem",  # type: ignore  # noqa: F821
+        *,
+        commit: bool = True,
+    ) -> Movie:
+        """Insert movie with minimal data from TMDB list endpoints.
+
+        This function stores only the data available in TMDB list responses
+        (search, discover, trending, etc.) without making additional API calls.
+        The movie is marked as not hydrated (is_hydrated=False).
+
+        Args:
+            db: Database session
+            tmdb_movie_item: MovieItem from TMDB list endpoint response
+            commit: Whether to commit the transaction
+
+        Returns:
+            Movie object with minimal data (not hydrated)
+        """
+        # Prepare movie data with defaults for fields not in list response
+        movie_data = {
+            "tmdb_id": tmdb_movie_item.tmdb_id,
+            "title": tmdb_movie_item.title,
+            "original_title": tmdb_movie_item.original_title,
+            "overview": tmdb_movie_item.overview or "",
+            "poster_path": tmdb_movie_item.poster_path,
+            "backdrop_path": tmdb_movie_item.backdrop_path,
+            "original_language": tmdb_movie_item.original_language,
+            "release_date": tmdb_movie_item.release_date,
+            "vote_average": tmdb_movie_item.vote_average,
+            "vote_count": tmdb_movie_item.vote_count,
+            "popularity": tmdb_movie_item.popularity,
+            "adult": tmdb_movie_item.adult,
+            # Fields not available in list response - use defaults
+            "runtime": None,
+            "budget": None,
+            "revenue": None,
+            "status": None,
+            # Hydration tracking
+            "is_hydrated": False,
+            "last_hydrated_at": None,
+            "hydration_source": None,
+        }
+
+        # Use PostgreSQL INSERT ... ON CONFLICT DO NOTHING
+        # We only insert if movie doesn't exist; we don't update existing movies
+        stmt = insert(Movie.__table__).values(movie_data)
+        stmt = stmt.on_conflict_do_nothing(index_elements=[Movie.__table__.c.tmdb_id])
+        stmt = stmt.returning(Movie.__table__.c.id)
+
+        result = await db.execute(stmt)
+        row = result.fetchone()
+
+        if commit:
+            await db.commit()
+
+        # If row is None, movie already existed - fetch it
+        if row is None:
+            existing = await self.get_by_tmdb_id(db, tmdb_movie_item.tmdb_id)
+            if existing is None:
+                raise ValueError(
+                    f"Failed to insert movie with tmdb_id={tmdb_movie_item.tmdb_id}"
+                )
+            return existing
+
+        # Fetch the newly inserted movie
+        movie_id = row[0]
+        return await self.get(db, movie_id)
+
+    async def insert_movies_from_tmdb_list_batch(
+        self,
+        db: AsyncSession,
+        tmdb_movie_items: list["MovieItem"],  # type: ignore  # noqa: F821
+        *,
+        commit: bool = True,
+    ) -> list[Movie]:
+        """Batch insert movies from TMDB list endpoints.
+
+        Args:
+            db: Database session
+            tmdb_movie_items: List of MovieItem from TMDB list response
+            commit: Whether to commit the transaction
+
+        Returns:
+            List of Movie objects (newly inserted or existing)
+        """
+        if not tmdb_movie_items:
+            return []
+
+        # Prepare batch insert data
+        movies_data = []
+        for item in tmdb_movie_items:
+            movies_data.append(
+                {
+                    "tmdb_id": item.tmdb_id,
+                    "title": item.title,
+                    "original_title": item.original_title,
+                    "overview": item.overview or "",
+                    "poster_path": item.poster_path,
+                    "backdrop_path": item.backdrop_path,
+                    "original_language": item.original_language,
+                    "release_date": item.release_date,
+                    "vote_average": item.vote_average,
+                    "vote_count": item.vote_count,
+                    "popularity": item.popularity,
+                    "adult": item.adult,
+                    "runtime": None,
+                    "budget": None,
+                    "revenue": None,
+                    "status": None,
+                    "is_hydrated": False,
+                    "last_hydrated_at": None,
+                    "hydration_source": None,
+                    "created_at": datetime.now(),
+                    "updated_at": datetime.now(),
+                }
+            )
+
+        # Batch insert with ON CONFLICT DO NOTHING
+        stmt = insert(Movie.__table__).values(movies_data)
+        stmt = stmt.on_conflict_do_nothing(index_elements=[Movie.__table__.c.tmdb_id])
+
+        await db.execute(stmt)
+
+        if commit:
+            await db.commit()
+
+        # Fetch all movies (both newly inserted and existing)
+        tmdb_ids = [item.tmdb_id for item in tmdb_movie_items]
+        return await self.get_by_tmdb_ids(db, tmdb_ids)
 
 
 # Singleton instance
