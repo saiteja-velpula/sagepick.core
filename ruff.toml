@@ -66,6 +66,9 @@ ignore = [
 "app/api/**/*.py" = [
     "ARG001",  # Unused function arguments (FastAPI dependencies like token)
 ]
+"app/utils/movie_processor.py" = [
+    "PLC0415", # Import outside top-level (intentional for circular dependency)
+]
 
 [lint.pydocstyle]
 convention = "google"

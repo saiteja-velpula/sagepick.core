@@ -200,6 +200,7 @@ async def insert_from_list_and_queue(
 
     # Queue for background hydration (fire-and-forget)
     if queue_for_hydration:
+        # Lazy import to avoid circular dependency with hydration_service
         from app.services.hydration_service import hydration_service
 
         tmdb_ids = [m.tmdb_id for m in tmdb_movies]
