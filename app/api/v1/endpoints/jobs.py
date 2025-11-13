@@ -1,17 +1,16 @@
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select, delete
+from sqlmodel import delete, select
 
-from app.core.db import get_session
-from app.core.scheduler import job_scheduler
-from app.core.redis import redis_client
-from app.core.job_execution import job_execution_manager
-from app.crud.job_status import job_status
-from app.crud.job_log import job_log
-from app.models.job_status import JobType, JobExecutionStatus, JobStatusRead
-from app.models.job_log import JobLogRead, LogLevel
 from app.api.deps import verify_token
+from app.core.db import get_session
+from app.core.job_execution import job_execution_manager
+from app.core.redis import redis_client
+from app.core.scheduler import job_scheduler
+from app.crud.job_log import job_log
+from app.crud.job_status import job_status
+from app.models.job_log import JobLogRead, LogLevel
+from app.models.job_status import JobExecutionStatus, JobStatusRead, JobType
 
 router = APIRouter()
 
@@ -32,7 +31,7 @@ async def trigger_job_manually(job_id: str, token: dict = Depends(verify_token))
     valid_job_ids = [
         "movie_discovery_job",
         "change_tracking_job",
-        "category_refresh_job",
+        "dataset_export_job",
     ]
 
     if job_id not in valid_job_ids:
@@ -81,11 +80,11 @@ async def resume_job(job_id: str, token: dict = Depends(verify_token)):
 
 
 # Job Status Endpoints
-@router.get("/status", response_model=List[JobStatusRead])
+@router.get("/status", response_model=list[JobStatusRead])
 async def get_recent_job_statuses(
     limit: int = Query(50, ge=1, le=200),
-    job_type: Optional[JobType] = Query(None, description="Filter by job type"),
-    status_filter: Optional[JobExecutionStatus] = Query(
+    job_type: JobType | None = Query(None, description="Filter by job type"),
+    status_filter: JobExecutionStatus | None = Query(
         None, alias="status", description="Filter by execution status"
     ),
     db: AsyncSession = Depends(get_session),
@@ -106,7 +105,7 @@ async def get_recent_job_statuses(
     return result.scalars().all()
 
 
-@router.get("/status/running", response_model=List[JobStatusRead])
+@router.get("/status/running", response_model=list[JobStatusRead])
 async def get_running_jobs(
     db: AsyncSession = Depends(get_session), token: dict = Depends(verify_token)
 ):
@@ -114,7 +113,7 @@ async def get_running_jobs(
     return await job_status.get_running_jobs(db)
 
 
-@router.get("/status/failed", response_model=List[JobStatusRead])
+@router.get("/status/failed", response_model=list[JobStatusRead])
 async def get_failed_jobs(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_session),
@@ -131,7 +130,7 @@ async def get_failed_jobs(
     return result.scalars().all()
 
 
-@router.get("/status/completed", response_model=List[JobStatusRead])
+@router.get("/status/completed", response_model=list[JobStatusRead])
 async def get_completed_jobs(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_session),
@@ -148,7 +147,7 @@ async def get_completed_jobs(
     return result.scalars().all()
 
 
-@router.get("/status/type/{job_type}", response_model=List[JobStatusRead])
+@router.get("/status/type/{job_type}", response_model=list[JobStatusRead])
 async def get_job_statuses_by_type(
     job_type: JobType,
     limit: int = Query(20, ge=1, le=100),
@@ -239,16 +238,17 @@ async def cancel_running_job(
 
 
 # Job Logs Endpoints
-@router.get("/logs", response_model=List[JobLogRead])
+@router.get("/logs", response_model=list[JobLogRead])
 async def get_recent_job_logs(
     limit: int = Query(100, ge=1, le=1000),
-    level: Optional[LogLevel] = Query(None, description="Filter by log level"),
+    level: LogLevel | None = Query(None, description="Filter by log level"),
     db: AsyncSession = Depends(get_session),
     token: dict = Depends(verify_token),
 ):
     """Get recent job logs across all jobs with optional filtering."""
     if level:
-        # Add method to get logs by level - for now use existing error method for ERROR level
+        # Add method to get logs by level
+        # For now use existing error method for ERROR level
         if level == LogLevel.ERROR:
             return await job_log.get_error_logs(db, limit=limit)
         else:
@@ -257,7 +257,7 @@ async def get_recent_job_logs(
     return await job_log.get_recent_logs(db, limit=limit)
 
 
-@router.get("/logs/errors", response_model=List[JobLogRead])
+@router.get("/logs/errors", response_model=list[JobLogRead])
 async def get_error_logs(
     limit: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_session),
@@ -267,7 +267,7 @@ async def get_error_logs(
     return await job_log.get_error_logs(db, limit=limit)
 
 
-@router.get("/logs/job/{job_status_id}", response_model=List[JobLogRead])
+@router.get("/logs/job/{job_status_id}", response_model=list[JobLogRead])
 async def get_job_logs(
     job_status_id: int,
     db: AsyncSession = Depends(get_session),
@@ -298,8 +298,8 @@ async def start_scheduler(token: dict = Depends(verify_token)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start scheduler: {str(e)}",
-        )
+            detail=f"Failed to start scheduler: {e!s}",
+        ) from e
 
 
 @router.post("/scheduler/stop")
@@ -314,8 +314,8 @@ async def stop_scheduler(token: dict = Depends(verify_token)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to stop scheduler: {str(e)}",
-        )
+            detail=f"Failed to stop scheduler: {e!s}",
+        ) from e
 
 
 @router.get("/types")

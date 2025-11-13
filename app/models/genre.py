@@ -1,5 +1,7 @@
-from typing import Optional, List, TYPE_CHECKING
-from sqlmodel import SQLModel, Field, Relationship
+from typing import TYPE_CHECKING
+
+from sqlmodel import Field, Relationship, SQLModel
+
 from .movie_genre import MovieGenre
 
 if TYPE_CHECKING:
@@ -13,10 +15,10 @@ class GenreBase(SQLModel):
 
 class Genre(GenreBase, table=True):
     __tablename__ = "genres"
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
 
     # Many-to-many relationship with movies
-    movies: List["Movie"] = Relationship(back_populates="genres", link_model=MovieGenre)
+    movies: list["Movie"] = Relationship(back_populates="genres", link_model=MovieGenre)
 
 
 class GenreRead(GenreBase):

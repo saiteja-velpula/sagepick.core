@@ -1,73 +1,58 @@
-"""
-Movies API endpoints for SAGEPICK movie data management.
-"""
+import logging
 
-from typing import List, Optional
-from math import ceil
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select, func
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from sqlmodel import func, select
 
-from app.core.db import get_session
-from app.crud.movie import movie as movie_crud
-from app.crud.media_category import media_category as media_category_crud
-from app.models.movie import Movie
-from app.models.media_category import MediaCategory, MediaCategoryRead
-from app.models.media_category_movie import MediaCategoryMovie
-from app.models.genre import Genre
-from app.models.keyword import Keyword
-from app.models.movie_genre import MovieGenre
-from app.models.movie_keyword import MovieKeyword
 from app.api.deps import verify_token
+from app.core.db import get_session
+from app.core.tmdb import get_tmdb_client
+from app.crud.movie import movie as movie_crud
 from app.models.api_models import (
-    PaginatedResponse,
-    PaginationInfo,
-    MovieListItem,
-    MovieFullDetail,
     GenreDict,
     KeywordDict,
+    MovieFullDetail,
+    MovieListItem,
 )
+from app.models.genre import Genre
+from app.models.keyword import Keyword
+from app.models.movie import Movie
+from app.models.movie_genre import MovieGenre
+from app.utils.movie_processor import fetch_and_insert_full
+from app.utils.pagination import (
+    PaginatedResponse,
+    calculate_offset,
+    create_pagination_info,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-# Helper function to create pagination info
-def create_pagination_info(
-    page: int, per_page: int, total_items: int
-) -> PaginationInfo:
-    total_pages = ceil(total_items / per_page) if total_items > 0 else 1
-    return PaginationInfo(
-        page=page,
-        per_page=per_page,
-        total_items=total_items,
-        total_pages=total_pages,
-        has_next=page < total_pages,
-        has_prev=page > 1,
-    )
-
-
 # Movie Endpoints
-@router.get("/movies", response_model=PaginatedResponse[MovieListItem])
+@router.get("/", response_model=PaginatedResponse[MovieListItem])
 async def get_movies(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    search: Optional[str] = Query(None, description="Search in title or overview"),
-    genre: Optional[str] = Query(
+    search: str | None = Query(None, description="Search in title or overview"),
+    genre: str | None = Query(
         None, description="Filter by genre name (comma-separated for multiple)"
     ),
-    exclude_genre: Optional[str] = Query(
+    exclude_genre: str | None = Query(
         None, description="Exclude movies matching this genre name (comma-separated)"
     ),
-    min_popularity: Optional[float] = Query(
+    min_popularity: float | None = Query(
         None, ge=0, description="Minimum popularity score"
     ),
-    adult: Optional[bool] = Query(None, description="Filter by adult content"),
+    adult: bool | None = Query(None, description="Filter by adult content"),
     db: AsyncSession = Depends(get_session),
     token: dict = Depends(verify_token),
 ):
     """Get paginated list of movies with essential fields only."""
-    offset = (page - 1) * per_page
+    offset = calculate_offset(page, per_page)
 
     # Build the query
     query = select(Movie)
@@ -160,36 +145,66 @@ async def get_movies(
     return PaginatedResponse(data=movie_items, pagination=pagination)
 
 
-@router.get("/movies/{movie_id}", response_model=MovieFullDetail)
+@router.get("/{movie_id}", response_model=MovieFullDetail)
 async def get_movie_by_id(
     movie_id: int,
     db: AsyncSession = Depends(get_session),
     token: dict = Depends(verify_token),
 ):
-    """Get movie by ID with all details including genres and keywords."""
-    # Get movie
-    movie_obj = await movie_crud.get(db, movie_id)
+    """Get movie by ID with all details including genres and keywords.
+
+    If the movie is not hydrated, it will be hydrated synchronously before returning.
+    """
+    # Use eager loading to fetch movie with relationships in a single query
+    query = (
+        select(Movie)
+        .options(selectinload(Movie.genres), selectinload(Movie.keywords))
+        .where(Movie.id == movie_id)
+    )
+
+    result = await db.execute(query)
+    movie_obj = result.scalar_one_or_none()
+
     if not movie_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Movie not found"
         )
 
-    # Get genres
-    genres_query = select(Genre).join(MovieGenre).where(MovieGenre.movie_id == movie_id)
-    genres_result = await db.execute(genres_query)
-    genres = genres_result.scalars().all()
+    # Check if movie needs hydration
+    if not movie_obj.is_hydrated:
+        logger.info(f"Movie {movie_obj.tmdb_id} not hydrated, hydrating now...")
 
-    # Get keywords
-    keywords_query = (
-        select(Keyword).join(MovieKeyword).where(MovieKeyword.movie_id == movie_id)
-    )
-    keywords_result = await db.execute(keywords_query)
-    keywords = keywords_result.scalars().all()
+        # Hydrate synchronously (user is waiting for this specific movie)
+        tmdb_client = await get_tmdb_client()
+        hydrated_movie = await fetch_and_insert_full(
+            db=db,
+            tmdb_client=tmdb_client,
+            tmdb_id=movie_obj.tmdb_id,
+            hydration_source="user_request",
+            job_id=None,
+        )
 
-    # Convert to response format
-    genres_dict = [GenreDict(id=genre.id, name=genre.name) for genre in genres]
+        if hydrated_movie:
+            # Refresh to get updated data with relationships
+            query = (
+                select(Movie)
+                .options(selectinload(Movie.genres), selectinload(Movie.keywords))
+                .where(Movie.id == movie_id)
+            )
+            result = await db.execute(query)
+            movie_obj = result.scalar_one_or_none()
+            logger.info(f"Movie {movie_obj.tmdb_id} hydrated successfully")
+        else:
+            logger.warning(
+                f"Failed to hydrate movie {movie_obj.tmdb_id}, returning partial data"
+            )
+
+    # Convert to response format using eager-loaded relationships
+    genres_dict = [
+        GenreDict(id=genre.id, name=genre.name) for genre in movie_obj.genres
+    ]
     keywords_dict = [
-        KeywordDict(id=keyword.id, name=keyword.name) for keyword in keywords
+        KeywordDict(id=keyword.id, name=keyword.name) for keyword in movie_obj.keywords
     ]
 
     return MovieFullDetail(
@@ -215,7 +230,7 @@ async def get_movie_by_id(
     )
 
 
-@router.get("/movies/tmdb/{tmdb_id}", response_model=MovieFullDetail)
+@router.get("/tmdb/{tmdb_id}", response_model=MovieFullDetail)
 async def get_movie_by_tmdb_id(
     tmdb_id: int,
     db: AsyncSession = Depends(get_session),
@@ -230,120 +245,6 @@ async def get_movie_by_tmdb_id(
 
     # Redirect to get_movie_by_id for consistency
     return await get_movie_by_id(movie_obj.id, db)
-
-
-# Movie Categories Endpoints
-@router.get("/categories", response_model=List[MediaCategoryRead])
-async def get_movie_categories(
-    db: AsyncSession = Depends(get_session), token: dict = Depends(verify_token)
-):
-    """Get all movie categories."""
-    return await media_category_crud.get_all_categories(db)
-
-
-@router.get("/categories/{category_id}", response_model=MediaCategoryRead)
-async def get_movie_category(
-    category_id: int,
-    db: AsyncSession = Depends(get_session),
-    token: dict = Depends(verify_token),
-):
-    """Get a specific movie category."""
-    category = await media_category_crud.get(db, category_id)
-    if not category:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
-        )
-    return category
-
-
-@router.get(
-    "/categories/{category_id}/movies", response_model=PaginatedResponse[MovieListItem]
-)
-async def get_movies_by_category(
-    category_id: int,
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: AsyncSession = Depends(get_session),
-    token: dict = Depends(verify_token),
-):
-    """Get movies in a specific category with pagination."""
-    # Check if category exists
-    category = await media_category_crud.get(db, category_id)
-    if not category:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
-        )
-
-    offset = (page - 1) * per_page
-
-    # Query movies in category
-    movies_query = (
-        select(Movie)
-        .join(MediaCategoryMovie)
-        .where(MediaCategoryMovie.media_category_id == category_id)
-        .order_by(Movie.popularity.desc())
-        .offset(offset)
-        .limit(per_page)
-    )
-
-    # Count total movies in category
-    count_query = (
-        select(func.count(Movie.id))
-        .join(MediaCategoryMovie)
-        .where(MediaCategoryMovie.media_category_id == category_id)
-    )
-
-    # Execute queries
-    movies_result = await db.execute(movies_query)
-    movies = movies_result.scalars().all()
-
-    count_result = await db.execute(count_query)
-    total_items = count_result.scalar()
-
-    # Convert to response format
-    movie_items = [
-        MovieListItem(
-            id=movie.id,
-            tmdb_id=movie.tmdb_id,
-            title=movie.title,
-            overview=movie.overview,
-            backdrop_path=movie.backdrop_path,
-            poster_path=movie.poster_path,
-            adult=movie.adult,
-            popularity=movie.popularity,
-            vote_average=movie.vote_average,
-            release_date=movie.release_date.isoformat() if movie.release_date else None,
-        )
-        for movie in movies
-    ]
-
-    pagination = create_pagination_info(page, per_page, total_items)
-
-    return PaginatedResponse(data=movie_items, pagination=pagination)
-
-
-@router.get(
-    "/categories/name/{category_name}/movies",
-    response_model=PaginatedResponse[MovieListItem],
-)
-async def get_movies_by_category_name(
-    category_name: str,
-    page: int = Query(1, ge=1, description="Page number"),
-    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    db: AsyncSession = Depends(get_session),
-    token: dict = Depends(verify_token),
-):
-    """Get movies in a category by category name with pagination."""
-    # Get category by name
-    category = await media_category_crud.get_by_name(db, category_name)
-    if not category:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Category '{category_name}' not found",
-        )
-
-    # Redirect to get_movies_by_category
-    return await get_movies_by_category(category.id, page, per_page, db)
 
 
 # Statistics Endpoints
@@ -367,11 +268,6 @@ async def get_movie_statistics(
     total_keywords_result = await db.execute(total_keywords_query)
     total_keywords = total_keywords_result.scalar()
 
-    # Total categories
-    total_categories_query = select(func.count(MediaCategory.id))
-    total_categories_result = await db.execute(total_categories_query)
-    total_categories = total_categories_result.scalar()
-
     # Movies by adult content
     adult_movies_query = select(func.count(Movie.id)).where(Movie.adult)
     adult_movies_result = await db.execute(adult_movies_query)
@@ -381,7 +277,6 @@ async def get_movie_statistics(
         "total_movies": total_movies,
         "total_genres": total_genres,
         "total_keywords": total_keywords,
-        "total_categories": total_categories,
         "adult_movies": adult_movies,
         "non_adult_movies": total_movies - adult_movies,
     }

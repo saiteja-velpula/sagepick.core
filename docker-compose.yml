@@ -7,7 +7,7 @@ services:
     env_file:
       - .env.local
     environment:
-      DATABASE_URL: postgresql://sagepick:sagepick@postgres:5432/sagepick
+      DATABASE_URL: postgresql://sagepick:sagepick@postgres:5432/sagepick  # pragma: allowlist secret
       REDIS_URL: redis://redis:6379/0
       MOVIE_DISCOVERY_START_DELAY_MINUTES: 0
     ports:
@@ -23,7 +23,7 @@ services:
     environment:
       POSTGRES_DB: sagepick
       POSTGRES_USER: sagepick
-      POSTGRES_PASSWORD: sagepick
+      POSTGRES_PASSWORD: sagepick  # pragma: allowlist secret
     ports:
       - "5433:5432"
     healthcheck:

@@ -1,0 +1,54 @@
+# Interrogate docstring coverage configuration for SAGEPICK Core
+# Documentation: https://interrogate.readthedocs.io/en/latest/
+
+[tool.interrogate]
+# Ignore init methods
+ignore-init-method = true
+ignore-init-module = false
+
+# Ignore magic methods like __str__, __repr__
+ignore-magic = false
+
+# Ignore private methods
+ignore-private = false
+
+# Ignore semiprivate methods (single underscore)
+ignore-semiprivate = false
+
+# Ignore property decorators
+ignore-property-decorators = false
+
+# Ignore module docstrings
+ignore-module = false
+
+# Ignore nested functions
+ignore-nested-functions = false
+
+# Ignore nested classes
+ignore-nested-classes = true
+
+# Minimum coverage percentage to pass (adjusted to current coverage)
+# TODO: Gradually increase to 80% as we add docstrings
+fail-under = 34
+
+# Exclude directories
+exclude = ["tests", "migrations", "scripts", "alembic", ".venv", "venv", "env"]
+
+# Verbose output
+verbose = 1
+
+# Quiet mode (only summary)
+quiet = false
+
+# Use colors
+color = true
+
+# Generate badge
+generate-badge = "."
+badge-format = "svg"
+
+# Badge style
+badge-style = "flat-square"
+
+# Output format (terminal, json, etc.)
+# omit-covered-files = false

@@ -17,11 +17,9 @@ from sqlmodel import SQLModel
 # Import association tables first to avoid circular imports
 from app.models.movie_genre import MovieGenre
 from app.models.movie_keyword import MovieKeyword
-from app.models.media_category_movie import MediaCategoryMovie
 from app.models.genre import Genre
 from app.models.keyword import Keyword
 from app.models.movie import Movie
-from app.models.media_category import MediaCategory
 from app.models.job_status import JobStatus
 from app.models.job_log import JobLog
 from app.models.movie_discovery_state import MovieDiscoveryState

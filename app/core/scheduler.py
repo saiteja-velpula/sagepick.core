@@ -1,13 +1,14 @@
 import logging
-from datetime import datetime, timedelta
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.jobstores.memory import MemoryJobStore
-from apscheduler.executors.asyncio import AsyncIOExecutor
+from datetime import UTC, datetime, timedelta
 
-from app.jobs import movie_discovery_job, change_tracking_job, category_refresh_job
+from apscheduler.executors.asyncio import AsyncIOExecutor
+from apscheduler.jobstores.memory import MemoryJobStore
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
 from app.core.settings import settings
+from app.jobs import change_tracking_job, dataset_export_job, movie_discovery_job
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +17,7 @@ class JobScheduler:
     """Manages all scheduled jobs for SAGEPICK."""
 
     def __init__(self):
-        self._job_ids = {
-            "movie_discovery_job",
-            "change_tracking_job",
-            "category_refresh_job",
-        }
+        self._job_ids = set()
         self._create_scheduler()
 
     def _create_scheduler(self):
@@ -54,47 +51,77 @@ class JobScheduler:
             )
 
         try:
-            # Job 1: Movie Discovery Job - Every 5 minutes
-            next_run_time = datetime.utcnow()
+            self._job_ids = {
+                "movie_discovery_job",
+                "change_tracking_job",
+            }
+            if settings.DATASET_EXPORT.enabled:
+                self._job_ids.add("dataset_export_job")
+
+            # Job 1: Movie Discovery Job - Configurable interval
+            next_run_time = datetime.now(UTC)
             delay_minutes = settings.MOVIE_DISCOVERY_START_DELAY_MINUTES
             if delay_minutes > 0:
-                next_run_time = datetime.utcnow() + timedelta(minutes=delay_minutes)
+                next_run_time = datetime.now(UTC) + timedelta(minutes=delay_minutes)
 
+            discovery_interval = settings.JOBS.movie_discovery_interval_minutes
             self.scheduler.add_job(
                 func=movie_discovery_job.run,
-                trigger=IntervalTrigger(minutes=2),
+                trigger=IntervalTrigger(minutes=discovery_interval),
                 id="movie_discovery_job",
                 name="Movie Discovery Job",
                 replace_existing=True,
                 next_run_time=next_run_time,
             )
-            logger.info("Configured Movie Discovery Job - runs every 5 minutes")
+            logger.info(
+                "Configured Movie Discovery Job - runs every %d minutes",
+                discovery_interval,
+            )
 
-            # Job 2: Change Tracking Job - Daily at 2:00 AM UTC
+            # Job 2: Change Tracking Job - Configurable daily time
+            change_hour = settings.JOBS.change_tracking_hour
+            change_minute = settings.JOBS.change_tracking_minute
             self.scheduler.add_job(
                 func=change_tracking_job.run,
-                trigger=CronTrigger(hour=2, minute=0),
+                trigger=CronTrigger(hour=change_hour, minute=change_minute),
                 id="change_tracking_job",
                 name="Change Tracking Job",
                 replace_existing=True,
             )
-            logger.info("Configured Change Tracking Job - runs daily at 2:00 AM UTC")
-
-            # Job 3: Category Refresh Job - Daily at 5:00 AM UTC
-            self.scheduler.add_job(
-                func=category_refresh_job.run,
-                trigger=CronTrigger(hour=5, minute=0),
-                id="category_refresh_job",
-                name="Category Refresh Job",
-                replace_existing=True,
+            logger.info(
+                "Configured Change Tracking Job - runs daily at %02d:%02d UTC",
+                change_hour,
+                change_minute,
             )
-            logger.info("Configured Category Refresh Job - runs daily at 5:00 AM UTC")
+
+            # Job 3: Dataset Export Job - Weekly schedule
+            dataset_config = settings.DATASET_EXPORT
+            if dataset_config.enabled:
+                self.scheduler.add_job(
+                    func=dataset_export_job.run,
+                    trigger=CronTrigger(
+                        day_of_week=dataset_config.schedule_day_of_week,
+                        hour=dataset_config.schedule_hour,
+                        minute=dataset_config.schedule_minute,
+                    ),
+                    id="dataset_export_job",
+                    name="Dataset Export Job",
+                    replace_existing=True,
+                )
+                logger.info(
+                    "Configured Dataset Export Job - runs %s at %02d:%02d UTC",
+                    dataset_config.schedule_day_of_week,
+                    dataset_config.schedule_hour,
+                    dataset_config.schedule_minute,
+                )
+            else:
+                logger.info("Dataset Export Job disabled in configuration")
 
             self._jobs_configured = True
             logger.info("All jobs configured successfully")
 
         except Exception as e:
-            logger.error(f"Failed to configure jobs: {str(e)}")
+            logger.error(f"Failed to configure jobs: {e!s}")
             raise
 
     async def start(self):
@@ -114,7 +141,7 @@ class JobScheduler:
                 logger.info(f"Job '{job.name}' next run: {job.next_run_time}")
 
         except Exception as e:
-            logger.error(f"Failed to start scheduler: {str(e)}")
+            logger.error(f"Failed to start scheduler: {e!s}")
             raise
 
     async def stop(self):
@@ -126,7 +153,7 @@ class JobScheduler:
             else:
                 logger.info("Job scheduler already stopped")
         except Exception as e:
-            logger.error(f"Failed to stop scheduler: {str(e)}")
+            logger.error(f"Failed to stop scheduler: {e!s}")
             raise
         finally:
             # Reset the scheduler so a subsequent start creates fresh jobs
@@ -170,8 +197,8 @@ class JobScheduler:
                     await movie_discovery_job.run()
                 elif job_id == "change_tracking_job":
                     await change_tracking_job.run()
-                elif job_id == "category_refresh_job":
-                    await category_refresh_job.run()
+                elif job_id == "dataset_export_job":
+                    await dataset_export_job.run()
                 else:
                     return False
 
@@ -181,7 +208,7 @@ class JobScheduler:
                 logger.error(f"Job not found: {job_id}")
                 return False
         except Exception as e:
-            logger.error(f"Failed to trigger job {job_id}: {str(e)}")
+            logger.error(f"Failed to trigger job {job_id}: {e!s}")
             return False
 
     def pause_job(self, job_id: str) -> bool:
@@ -191,7 +218,7 @@ class JobScheduler:
             logger.info(f"Paused job: {job_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to pause job {job_id}: {str(e)}")
+            logger.error(f"Failed to pause job {job_id}: {e!s}")
             return False
 
     def resume_job(self, job_id: str) -> bool:
@@ -201,7 +228,7 @@ class JobScheduler:
             logger.info(f"Resumed job: {job_id}")
             return True
         except Exception as e:
-            logger.error(f"Failed to resume job {job_id}: {str(e)}")
+            logger.error(f"Failed to resume job {job_id}: {e!s}")
             return False
 
     @property

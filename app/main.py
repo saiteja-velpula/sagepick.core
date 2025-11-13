@@ -1,19 +1,26 @@
-import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-from app.core.scheduler import job_scheduler
-from app.core.redis import redis_client
-from app.api import router
 from app import __version__ as app_version
+from app.api import api_router
+from app.core.db import async_session
+from app.core.exceptions import register_exception_handlers
+from app.core.logging import get_structured_logger, setup_logging
+from app.core.middleware import CorrelationIdMiddleware
+from app.core.redis import redis_client
+from app.core.scheduler import job_scheduler
+from app.core.tmdb import close_tmdb_client
+from app.services.hydration_service import hydration_service
+from app.utils.helpers import preload_genres
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup structured logging
+setup_logging(use_json=False, correlation_id_in_format=True)
+logger = get_structured_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     # Startup
     logger.info("Starting SAGEPICK Core application...")
 
@@ -26,15 +33,31 @@ async def lifespan(app: FastAPI):
         await job_scheduler.start()
         logger.info("Job scheduler started")
 
+        # Start hydration background worker
+        await hydration_service.start_worker()
+        logger.info("Hydration background worker started")
+
+        # Preload genres into the database and cache
+        async with async_session() as db:
+            await preload_genres(db)
+
         yield
 
     finally:
         # Shutdown
         logger.info("Shutting down SAGEPICK Core application...")
 
+        # Stop hydration worker
+        await hydration_service.stop_worker()
+        logger.info("Hydration worker stopped")
+
         # Stop job scheduler
         await job_scheduler.stop()
         logger.info("Job scheduler stopped")
+
+        # Close TMDB client singleton
+        await close_tmdb_client()
+        logger.info("TMDB client closed")
 
         # Close Redis connection
         await redis_client.close()
@@ -49,7 +72,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(router)
+# Add middleware
+app.add_middleware(CorrelationIdMiddleware)
+
+# Register exception handlers
+register_exception_handlers(app)
+
+app.include_router(api_router)
 
 
 # Root endpoint
@@ -58,7 +87,9 @@ def read_root():
     return {
         "name": "Sagepick Core Backend!",
         "version": app_version,
-        "description": "Movie recommendation system with automated TMDB data synchronization",
+        "description": (
+            "Movie recommendation system with automated TMDB data synchronization"
+        ),
     }
 
 

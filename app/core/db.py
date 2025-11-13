@@ -1,13 +1,23 @@
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from .settings import settings
 
+
+def _as_asyncpg_dsn(db_url: str) -> str:
+    """Normalize a Postgres DSN so async SQLAlchemy can use asyncpg."""
+    normalized = db_url
+    if normalized.startswith("postgres://"):
+        normalized = normalized.replace("postgres://", "postgresql://", 1)
+    if normalized.startswith("postgresql://"):
+        normalized = normalized.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return normalized
+
+
 # Create async engine
-async_database_url = settings.DATABASE_URL.replace(
-    "postgresql://", "postgresql+asyncpg://"
-)
+async_database_url = _as_asyncpg_dsn(settings.DATABASE_URL)
 engine = create_async_engine(
     async_database_url,
     echo=False,

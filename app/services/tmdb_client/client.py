@@ -1,15 +1,17 @@
-from typing import Dict, Any
-from app.core.settings import settings
+from typing import Any
+
 from app.core import ApiClient, RetryConfig
+from app.core.settings import settings
+
 from .models import (
-    TMDBMovieListResponse,
-    MovieDetails,
     GenresResponse,
     KeywordsResponse,
-    MovieSearchParams,
-    MovieListResponse,
     MovieChangeResponse,
+    MovieDetails,
+    MovieListResponse,
+    MovieSearchParams,
     PaginationInfo,
+    TMDBMovieListResponse,
 )
 
 
@@ -42,11 +44,11 @@ class TMDBClient:
     async def close(self):
         await self.client.close()
 
-    def _build_params(self, **kwargs) -> Dict[str, Any]:
+    def _build_params(self, **kwargs) -> dict[str, Any]:
         return {k: v for k, v in kwargs.items() if v is not None}
 
     def _transform_list_response(
-        self, response_data: Dict[str, Any]
+        self, response_data: dict[str, Any]
     ) -> MovieListResponse:
         raw_response = TMDBMovieListResponse(**response_data)
 
@@ -77,10 +79,21 @@ class TMDBClient:
 
     # DISCOVERY & TRENDING ENDPOINTS
 
-    async def get_trending_movies(self, page: int = 1) -> MovieListResponse:
+    async def get_trending_movies_day(self, page: int = 1) -> MovieListResponse:
+        """Get movies trending today."""
+        params = self._build_params(page=page, language="en-US")
+        response = await self.client.get("/trending/movie/day", params=params)
+        return self._transform_list_response(response)
+
+    async def get_trending_movies_week(self, page: int = 1) -> MovieListResponse:
+        """Get movies trending this week."""
         params = self._build_params(page=page, language="en-US")
         response = await self.client.get("/trending/movie/week", params=params)
         return self._transform_list_response(response)
+
+    async def get_trending_movies(self, page: int = 1) -> MovieListResponse:
+        """Get trending movies (default to week)."""
+        return await self.get_trending_movies_week(page)
 
     async def get_popular_movies(self, page: int = 1) -> MovieListResponse:
         params = self._build_params(page=page, language="en-US")
@@ -146,64 +159,118 @@ class TMDBClient:
     # CONVENIENCE METHODS FOR SPECIFIC REGIONS
 
     # Indian Cinema
-    async def get_bollywood_movies(self, page: int = 1) -> MovieListResponse:
-        """Get Bollywood (Hindi) movies."""
+    async def get_bollywood_movies(
+        self, page: int = 1, sort_by: str = "primary_release_date.desc"
+    ) -> MovieListResponse:
+        """Get Bollywood (Hindi) movies.
+
+        Args:
+            page: Page number
+            sort_by: Sort order. Options:
+                - "primary_release_date.desc" (newest first, default)
+                - "popularity.desc" (most popular first)
+        """
         search_params = MovieSearchParams(
             page=page,
             with_origin_country="IN",
             with_original_language="hi",
-            sort_by="popularity.desc",
+            sort_by=sort_by,
         )
         return await self.discover_movies(search_params)
 
-    async def get_tollywood_movies(self, page: int = 1) -> MovieListResponse:
-        """Get Tollywood (Telugu) movies."""
+    async def get_tollywood_movies(
+        self, page: int = 1, sort_by: str = "primary_release_date.desc"
+    ) -> MovieListResponse:
+        """Get Tollywood (Telugu) movies.
+
+        Args:
+            page: Page number
+            sort_by: Sort order. Options:
+                - "primary_release_date.desc" (newest first, default)
+                - "popularity.desc" (most popular first)
+        """
         search_params = MovieSearchParams(
             page=page,
             with_origin_country="IN",
             with_original_language="te",
-            sort_by="popularity.desc",
+            sort_by=sort_by,
         )
         return await self.discover_movies(search_params)
 
-    async def get_kollywood_movies(self, page: int = 1) -> MovieListResponse:
-        """Get Kollywood (Tamil) movies."""
+    async def get_kollywood_movies(
+        self, page: int = 1, sort_by: str = "primary_release_date.desc"
+    ) -> MovieListResponse:
+        """Get Kollywood (Tamil) movies.
+
+        Args:
+            page: Page number
+            sort_by: Sort order. Options:
+                - "primary_release_date.desc" (newest first, default)
+                - "popularity.desc" (most popular first)
+        """
         search_params = MovieSearchParams(
             page=page,
             with_origin_country="IN",
             with_original_language="ta",
-            sort_by="popularity.desc",
+            sort_by=sort_by,
         )
         return await self.discover_movies(search_params)
 
-    async def get_mollywood_movies(self, page: int = 1) -> MovieListResponse:
-        """Get Mollywood (Malayalam) movies."""
+    async def get_mollywood_movies(
+        self, page: int = 1, sort_by: str = "primary_release_date.desc"
+    ) -> MovieListResponse:
+        """Get Mollywood (Malayalam) movies.
+
+        Args:
+            page: Page number
+            sort_by: Sort order. Options:
+                - "primary_release_date.desc" (newest first, default)
+                - "popularity.desc" (most popular first)
+        """
         search_params = MovieSearchParams(
             page=page,
             with_origin_country="IN",
             with_original_language="ml",
-            sort_by="popularity.desc",
+            sort_by=sort_by,
         )
         return await self.discover_movies(search_params)
 
-    async def get_sandalwood_movies(self, page: int = 1) -> MovieListResponse:
-        """Get Sandalwood (Kannada) movies."""
+    async def get_sandalwood_movies(
+        self, page: int = 1, sort_by: str = "primary_release_date.desc"
+    ) -> MovieListResponse:
+        """Get Sandalwood (Kannada) movies.
+
+        Args:
+            page: Page number
+            sort_by: Sort order. Options:
+                - "primary_release_date.desc" (newest first, default)
+                - "popularity.desc" (most popular first)
+        """
         search_params = MovieSearchParams(
             page=page,
             with_origin_country="IN",
             with_original_language="kn",
-            sort_by="popularity.desc",
+            sort_by=sort_by,
         )
         return await self.discover_movies(search_params)
 
     # Hollywood Cinema
-    async def get_hollywood_movies(self, page: int = 1) -> MovieListResponse:
-        """Get Hollywood (US English) movies."""
+    async def get_hollywood_movies(
+        self, page: int = 1, sort_by: str = "primary_release_date.desc"
+    ) -> MovieListResponse:
+        """Get Hollywood (US English) movies.
+
+        Args:
+            page: Page number
+            sort_by: Sort order. Options:
+                - "primary_release_date.desc" (newest first, default)
+                - "popularity.desc" (most popular first)
+        """
         search_params = MovieSearchParams(
             page=page,
             with_origin_country="US",
             with_original_language="en",
-            sort_by="popularity.desc",
+            sort_by=sort_by,
         )
         return await self.discover_movies(search_params)
 

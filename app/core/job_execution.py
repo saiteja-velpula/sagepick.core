@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Dict, Optional
 
 from app.models.job_status import JobType
 
@@ -19,7 +18,7 @@ class JobExecutionManager:
     """Tracks live job executions and supports cooperative cancellation."""
 
     def __init__(self) -> None:
-        self._jobs: Dict[int, RunningJob] = {}
+        self._jobs: dict[int, RunningJob] = {}
         self._lock = asyncio.Lock()
 
     async def register(self, job_status_id: int, job_type: JobType) -> asyncio.Event:
@@ -45,7 +44,8 @@ class JobExecutionManager:
     async def cancel(self, job_status_id: int) -> bool:
         """Request cancellation of a running job.
 
-        Returns True if the job was found and cancellation was initiated, False otherwise.
+        Returns True if the job was found and cancellation was initiated,
+        False otherwise.
         """
         async with self._lock:
             record = self._jobs.get(job_status_id)
@@ -63,7 +63,7 @@ class JobExecutionManager:
             )
             return True
 
-    async def get_running_job(self, job_status_id: int) -> Optional[RunningJob]:
+    async def get_running_job(self, job_status_id: int) -> RunningJob | None:
         async with self._lock:
             return self._jobs.get(job_status_id)
 

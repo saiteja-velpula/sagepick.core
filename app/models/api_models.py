@@ -1,28 +1,20 @@
-from typing import List, Generic, TypeVar, Optional
+from enum import Enum
+
 from pydantic import BaseModel, Field
-from .movie import MovieBase
+
 from .genre import GenreRead
 from .keyword import KeywordRead
-
-T = TypeVar("T")
-
-
-class PaginationInfo(BaseModel):
-    """Pagination metadata."""
-
-    page: int = Field(description="Current page number")
-    per_page: int = Field(description="Items per page")
-    total_items: int = Field(description="Total number of items")
-    total_pages: int = Field(description="Total number of pages")
-    has_next: bool = Field(description="Whether there is a next page")
-    has_prev: bool = Field(description="Whether there is a previous page")
+from .movie import MovieBase
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
-    """Generic paginated response."""
+class ReleaseYearRange(str, Enum):
+    """Release year range categories for filtering."""
 
-    data: List[T] = Field(description="List of items")
-    pagination: PaginationInfo = Field(description="Pagination information")
+    MODERN = "modern"  # 2020-present
+    RECENT = "recent"  # 2010-2019
+    CLASSIC = "classic"  # 1990-2009
+    RETRO = "retro"  # Before 1990
+    ALL = "all"  # No filter
 
 
 class MovieListItem(BaseModel):
@@ -31,21 +23,21 @@ class MovieListItem(BaseModel):
     id: int
     tmdb_id: int
     title: str
-    overview: Optional[str]
-    backdrop_path: Optional[str]
-    poster_path: Optional[str]
+    overview: str | None
+    backdrop_path: str | None
+    poster_path: str | None
     adult: bool
     popularity: float
     vote_average: float
-    release_date: Optional[str]  # Using string for date formatting
+    release_date: str | None  # Using string for date formatting
 
 
 class MovieDetailResponse(MovieBase):
     """Movie detail response with all fields plus relationships."""
 
     id: int
-    genres: List[GenreRead] = Field(description="Movie genres")
-    keywords: List[KeywordRead] = Field(description="Movie keywords")
+    genres: list[GenreRead] = Field(description="Movie genres")
+    keywords: list[KeywordRead] = Field(description="Movie keywords")
 
 
 class GenreDict(BaseModel):
@@ -66,5 +58,36 @@ class MovieFullDetail(MovieBase):
     """Movie with full details and relationships as dictionaries."""
 
     id: int
-    genres: List[GenreDict] = Field(description="Movie genres as id-name pairs")
-    keywords: List[KeywordDict] = Field(description="Movie keywords as id-name pairs")
+    genres: list[GenreDict] = Field(description="Movie genres as id-name pairs")
+    keywords: list[KeywordDict] = Field(description="Movie keywords as id-name pairs")
+
+
+class ColdStartPreferences(BaseModel):
+    """User preferences for cold-start recommendations."""
+
+    genre_ids: list[int] = Field(
+        ...,
+        min_length=1,
+        description="List of preferred genre IDs (at least 1 required)",
+    )
+    languages: list[str] = Field(
+        ...,
+        min_length=1,
+        description="List of preferred language codes (e.g., 'en', 'hi', 'te')",
+    )
+    release_year_ranges: list[ReleaseYearRange] = Field(
+        ...,
+        min_length=1,
+        description="List of preferred release year ranges",
+    )
+    keywords: list[str] | None = Field(
+        default=None, description="Optional list of keyword names for fine-tuning"
+    )
+
+
+class RankedMovieItem(MovieListItem):
+    """Movie item with ranking score for cold-start recommendations."""
+
+    rank_score: float = Field(
+        description="Calculated ranking score based on preference matching"
+    )

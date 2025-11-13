@@ -1,0 +1,83 @@
+# Bandit security scanner configuration for SAGEPICK Core
+# Documentation: https://bandit.readthedocs.io/en/latest/config.html
+
+# Directories to scan
+targets:
+  - app
+
+# Directories to exclude
+exclude_dirs:
+  - /tests
+  - /migrations
+  - /scripts
+  - /.venv
+  - /venv
+  - /env
+
+# Test IDs to skip
+skips:
+  - B104  # Hardcoded bind to all interfaces (0.0.0.0) - common in containers
+  - B608  # Possible SQL injection (false positives with SQLAlchemy)
+
+# Test severity levels
+# Tests can be: HIGH, MEDIUM, LOW
+tests:
+  - B201  # Flask app run with debug=True
+  - B301  # Pickle usage
+  - B302  # Marshal usage
+  - B303  # MD5 usage
+  - B304  # Use of insecure cipher
+  - B305  # Use of insecure cipher mode
+  - B306  # Use of insecure mktemp
+  - B307  # Use of possibly insecure function eval
+  - B308  # Use of mark_safe
+  # B309 - HTTPSConnection removed (deprecated in modern bandit)
+  - B310  # urllib urlopen
+  - B311  # Random usage
+  - B312  # Telnet usage
+  - B313  # XML usage
+  - B314  # XML usage
+  - B315  # XML usage
+  - B316  # XML usage
+  - B317  # XML usage
+  - B318  # XML usage
+  - B319  # XML usage
+  - B320  # XML usage
+  - B321  # FTP usage
+  - B323  # Unverified SSL context
+  - B324  # Insecure hash function
+  # B325 - Insecure temp file removed (deprecated in modern bandit)
+  - B401  # Import of insecure module
+  - B402  # Import of insecure module
+  - B403  # Import of insecure module
+  - B404  # Import of insecure module
+  - B405  # Import of insecure module
+  - B406  # Import of insecure module
+  - B407  # Import of insecure module
+  - B408  # Import of insecure module
+  - B409  # Import of insecure module
+  - B410  # Import of insecure module
+  - B411  # Import of insecure module
+  - B412  # Import of insecure module
+  - B413  # Import of pycrypto
+  - B501  # SSL with weak protocol
+  - B502  # SSL with bad defaults
+  - B503  # SSL with bad version
+  - B504  # SSL with no certificate validation
+  - B505  # Weak cryptographic key
+  - B506  # YAML load
+  - B507  # SSH with no host key verification
+  - B601  # Paramiko usage
+  - B602  # Shell injection
+  - B603  # Subprocess usage
+  - B604  # Shell usage
+  - B605  # Shell usage
+  - B606  # Process without shell
+  - B607  # Partial path usage
+  - B701  # Jinja2 autoescape false
+  - B702  # Test for use of mako templates
+  - B703  # Django mark safe
+
+# Confidence levels: HIGH, MEDIUM, LOW, UNDEFINED
+# Only show issues with at least MEDIUM confidence
+confidence_level: MEDIUM
